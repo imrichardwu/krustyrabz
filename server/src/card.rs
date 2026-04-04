@@ -1,35 +1,5 @@
-#[derive(Debug, Copy, Clone)]
-pub enum Suit {
-    Clubs,
-    Diamonds,
-    Hearts,
-    Spades,
-}
+use common::{Card, Rank, Suit};
 
-#[derive(Debug, Copy, Clone)]
-pub enum Rank {
-    Ace,
-    Two,
-    Three,
-    Four,
-    Five,
-    Six,
-    Seven,
-    Eight,
-    Nine,
-    Ten,
-    Jack,
-    Queen,
-    King,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct Card {
-    pub suit: Suit,
-    pub rank: Rank,
-}
-
-#[derive(Debug)]
 pub struct Deck {
     pub cards: [Card; 52],
 }
