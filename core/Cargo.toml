@@ -1,0 +1,7 @@
+[package]
+name = "poker_core" # 'core' is reserved by Rust. We must use a unique name here.
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }

@@ -1,8 +1,10 @@
 [package]
-name = "poker"
+name = "server"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-rand = "0.8"
-common = { path = "../common" }
+# We link to the folder 'core', but the package name inside is 'poker_core'
+poker_core = { path = "../core" }
+protocol = { path = "../protocol" }
+storage = { path = "../storage" }
