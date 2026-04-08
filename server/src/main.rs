@@ -1,4 +1,5 @@
 mod card;
+mod player;
 use card::{Deck};
 
 fn main() {

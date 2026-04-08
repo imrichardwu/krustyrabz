@@ -1,7 +1,7 @@
 use common::{Card, Rank, Suit};
 
 pub struct Deck {
-    pub cards: [Card; 52],
+    pub cards: Vec<Card>,
 }
 
 impl Deck {
@@ -20,10 +20,10 @@ impl Deck {
             }
         }
 
-        Self { cards: cards.try_into().unwrap() }
+        Self { cards }
     }
 
-    pub fn shuffle(&mut self)  {
+    pub fn shuffle(&mut self) {
         use rand::seq::SliceRandom;
         use rand::thread_rng;
 
@@ -32,8 +32,7 @@ impl Deck {
     }
 
     pub fn deal(&mut self, count: usize) -> Vec<Card> {
-        let dealt_cards = self.cards[..count].to_vec();
-        self.cards = self.cards[count..].to_vec().try_into().unwrap();
-        dealt_cards
+        let min_draw = count.min(self.cards.len());
+        self.cards.drain(..min_draw).collect() 
     }
 }
