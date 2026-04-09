@@ -1,3 +1,9 @@
+mod card;
+mod player;
+use card::{Deck};
+
 fn main() {
-    println!("let's play poker!");
+    let deck = Deck::standard();
+    println!("Deck has {} cards", deck.cards.len());
+    println!("First: {:?}, last: {:?}", deck.cards[0], deck.cards[51]);
 }
