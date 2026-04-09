@@ -1,6 +1,6 @@
-mod card;
+pub mod deck;
 mod player;
-use card::{Deck};
+use deck::{Deck};
 
 fn main() {
     let deck = Deck::standard();
