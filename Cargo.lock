@@ -157,6 +157,7 @@ dependencies = [
  "protocol",
  "rand",
  "storage",
+ "strum",
 ]
 
 [[package]]

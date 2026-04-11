@@ -1,5 +1,4 @@
 pub mod deck;
-mod player;
 use deck::{Deck};
 
 fn main() {

@@ -1,34 +1,28 @@
-use poker_core::{Card, Rank, Suit};
-use Suit::*;
-use Rank::*;
+use poker_core::{Card, Rank, Suit, DeckTrait};
 use rand::seq::SliceRandom;
+use strum::IntoEnumIterator;
+
 pub struct Deck {
     pub cards: Vec<Card>,
 }
 
 impl Deck {
-    pub fn standard() -> Self {
-        let suits = [Clubs, Diamonds, Hearts, Spades];
-        let ranks = [Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, Jack, Queen, King];
-
-        let mut cards = Vec::new();
-
-        for suit in suits {
-            for rank in ranks {
-                cards.push(Card {suit, rank});
+    pub fn construct() -> Self {
+        let mut cards = Vec::with_capacity(52);
+        for suit in Suit::iter(){
+            for rank in Rank::iter(){
+                cards.push(Card::construct(rank, suit))
             }
         }
-
         Self { cards }
+    }
+
+    pub fn standard() -> Self {
+        Self::construct()
     }
 
     pub fn shuffle(&mut self) {
         self.cards.shuffle(&mut rand::rng());
-    }
-
-    pub fn deal(&mut self, count: usize) -> Vec<Card> {
-        let min_draw = count.min(self.cards.len());
-        self.cards.drain(..min_draw).collect() 
     }
 
     pub fn len(&self) -> usize {
@@ -37,5 +31,12 @@ impl Deck {
 
     pub fn is_empty(&self) -> bool {
         self.cards.is_empty()
+    }
+}
+
+impl DeckTrait for Deck {
+    fn deal(&mut self, count: usize) -> Vec<Card> {
+        let min_draw = count.min(self.cards.len());
+        self.cards.drain(..min_draw).collect() 
     }
 }

@@ -9,3 +9,4 @@ poker_core = { path = "../core" }
 protocol = { path = "../protocol" }
 storage = { path = "../storage" }
 rand = "0.9.2"
+strum = "0.27"

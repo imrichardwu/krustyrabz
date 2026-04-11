@@ -1,4 +1,5 @@
 use crate::card::Card;
+use crate::hand::DeckTrait;
 
 pub struct Player {
     pub hand: Vec<Card>,
@@ -13,7 +14,7 @@ impl Player {
         }
     }
 
-    pub fn draw(&mut self, deck: &mut crate::hand::Deck, discard_indices: &[usize]) -> Result<(), String> {
+    pub fn draw(&mut self, deck: &mut dyn DeckTrait, discard_indices: &[usize]) -> Result<(), String> {
         let mut sorted_indices = discard_indices.to_vec();
         sorted_indices.sort_by(|a, b| b.cmp(a));
 
