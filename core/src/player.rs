@@ -1,14 +1,17 @@
 use crate::card::Card;
 use crate::hand::DeckTrait;
+use uuid::Uuid;
 
 pub struct Player {
+    pub id: Uuid,
     pub hand: Vec<Card>,
     pub chips: u32,
 }
 
 impl Player {
-    pub fn new(chips: u32) -> Self {
+    pub fn new(chips: u32, id: Uuid) -> Self {
         Self {
+            id,
             hand: Vec::new(),
             chips
         }
