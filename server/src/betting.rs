@@ -13,3 +13,5 @@ pub struct BettingState {
     pub contributions: HashMap<Uuid, u32>, // per player, this round
     pub folded: HashSet<Uuid>,
 }
+
+

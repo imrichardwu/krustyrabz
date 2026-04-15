@@ -1,3 +1,5 @@
+use uuid::Uuid;
+
 #[derive(Debug, Clone)]
 pub enum BetAction {
     Check,
@@ -5,4 +7,10 @@ pub enum BetAction {
     Bet { amount: u32 },
     Raise { amount: u32 },
     Fold,
+}
+
+pub enum BettingOutcome {
+    Continue, // next player acts
+    BettingRoundComplete,
+    HandComplete { winner: Uuid },
 }
