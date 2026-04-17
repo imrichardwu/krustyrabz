@@ -1,13 +1,9 @@
-mod five_card;
-mod seven_card;
-mod texas_holdem;
+mod games;
 mod lib;
 mod auth;
 
 use lib::banner;
-use five_card::five_card_draw;
-use seven_card::seven_card_stud;
-use texas_holdem::texas_holdem;
+use games::{five_card_draw, seven_card_stud, texas_holdem};
 use auth::{login, register};
 
 fn main() {
@@ -60,5 +56,6 @@ fn main() {
                 }
                 _ => println!("Invalid choice, please try again."),
             }
+        }
     }
 }
