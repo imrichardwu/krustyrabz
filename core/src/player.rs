@@ -6,6 +6,7 @@ pub struct Player {
     pub id: Uuid,
     pub hand: Vec<Card>,
     pub chips: u32,
+    pub game_id: u32
 }
 
 impl Player {
@@ -13,7 +14,8 @@ impl Player {
         Self {
             id,
             hand: Vec::new(),
-            chips
+            chips, 
+            game_id
         }
     }
 

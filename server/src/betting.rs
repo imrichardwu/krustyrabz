@@ -14,4 +14,6 @@ pub struct BettingState {
     pub folded: HashSet<Uuid>,
 }
 
+pub enum Bet
 
+pub struct 
