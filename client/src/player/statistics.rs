@@ -40,8 +40,9 @@ impl PlayerStatistics {
 
     /// Record a game lost with loss amount
     pub fn record_loss(&mut self, loss: u64) {
-        self.games_lost += 1;
-        self.total_losses += loss;
+        // Note: We track losses but not a separate games_lost count
+        // If you need games_lost count, add it as a field to the struct
+        self.total_losses += loss as i64;
         if loss > self.biggest_loss {
             self.biggest_loss = loss;
         }
@@ -54,11 +55,17 @@ impl PlayerStatistics {
 
     /// Calculate win rate (percentage of games won)
     pub fn get_win_rate(&self) -> f64 {
+        if self.rounds_played == 0 {
+            return 0.0;
+        }
         ((self.games_won as f64) / (self.rounds_played as f64)) * 100.0
     }
 
     /// Calculate fold rate (percentage of games folded)
     pub fn get_fold_rate(&self) -> f64 {
+        if self.rounds_played == 0 {
+            return 0.0;
+        }
         ((self.games_folded as f64) / (self.rounds_played as f64)) * 100.0
     }
 
