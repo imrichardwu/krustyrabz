@@ -6,5 +6,3 @@ edition = "2024"
 [dependencies]
 poker_core = { path = "../core" }
 serde = { version = "1.0", features = ["derive"] }
-diesel = { version = "2.2.0", features = ["postgres"]}
-supabase_rs = "=0.5.1"

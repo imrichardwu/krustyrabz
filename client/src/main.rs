@@ -1,8 +1,6 @@
 mod games;
 mod lib;
 mod auth;
-mod viewer;
-mod player;
 
 use lib::banner;
 use games::{five_card_draw, seven_card_stud, texas_holdem};
