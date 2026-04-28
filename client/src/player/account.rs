@@ -40,7 +40,7 @@ impl PlayerAccount {
     /// Withdraw chips from account (returns true if successful)
     pub fn withdraw_chips(&mut self, amount: u64) -> bool {
         if amount > self.chip_balance {
-            false
+            return false;
         }
         self.chip_balance -= amount;
         true
