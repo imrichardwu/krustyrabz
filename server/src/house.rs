@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex}; 
 use threadpool::ThreadPool; 
 //TODO need something like use std::
-use std::thread; 
+use std::thread;
+
 
 //dealer-threads let players buy into games 
 const n_floorstaff: usize = 20;
@@ -30,7 +31,7 @@ impl House {
         }
     }
 
-    pub fn place_new_player_at_open_table(&mut self) {
+    pub fn find_player_an_open_table(&mut self) {
         ; 
     }
 

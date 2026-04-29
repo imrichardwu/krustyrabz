@@ -1,25 +1,49 @@
+use super::{NetworkError, NetworkResult};
+use std::net::SocketAddr;
+use std::time::Duration;
+
+/// Represents a network connection to the server
 pub struct Connection {
-    socket: TcpStream,  // ← TCP connection
+    server_address: SocketAddr,
+    is_connected: bool,
+    connection_timeout: Duration,
+    // TODO: Add actual socket field TcpStream
 }
 
 impl Connection {
-    pub fn send(&mut self, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> { 
-        // Actually write to TCP socket
-        self.socket.write_all(bytes)?;
-        Ok(())
+    /// Create a new connection instance
+    pub fn new(server_address: SocketAddr) -> Self {
     }
-    
-    pub fn receive(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        // Actually read from TCP socket
-        self.socket.read(&mut buffer)?;
-        buffer
+
+    /// Set connection timeout duration
+    pub fn set_timeout(&mut self, timeout: Duration) {
     }
-    
-    fn disconnect(&mut self) {
-        self.socket.shutdown(Shutdown::Both)?;
+
+    /// Connect to the server
+    pub fn connect(&mut self) -> NetworkResult<()> {
     }
-    
-    fn get_address(&self) -> &str {
-        &self.server_address
+
+    /// Send a message to the server
+    pub fn send(&mut self, message: &[u8]) -> NetworkResult<()> {
+    }
+
+    /// Receive a message from the server
+    pub fn receive(&mut self) -> NetworkResult<Vec<u8>> {
+    }
+
+    /// Check if connection is active
+    pub fn is_connected(&self) -> bool {
+    }
+
+    /// Disconnect from the server
+    pub fn disconnect(&mut self) -> NetworkResult<()> {
+    }
+
+    /// Reconnect to the server
+    pub fn reconnect(&mut self) -> NetworkResult<()> {
+    }
+
+    /// Get server address
+    pub fn get_server_address(&self) -> SocketAddr {
     }
 }

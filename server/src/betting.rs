@@ -8,7 +8,7 @@ use uuid::Uuid;
 //TODO add convenience comments mapping rounds to variants and explaining them
 #[repr(u8)]
 pub enum BettingRounds {
-    #[strum(serialize = "predeal")] PreDeal,
+    #[strum(serialize = "predeal")] PreDeal, 
     #[strum(serialize = "predraw")] PreDraw, 
     #[strum(serialiez = "postdraw")] PostDraw, 
     #[strum(serialize = "preflop")] PreFlop, 
@@ -35,4 +35,4 @@ pub struct BettingState {
     pub contributions: HashMap<Uuid, u32>, // per player, this round
     pub folded: HashSet<Uuid>,
     pub betting_round: BettingRounds
-}
+} 
