@@ -9,6 +9,7 @@ use uuid::Uuid;
 #[repr(u8)]
 pub enum BettingRounds {
     #[strum(serialize = "predeal")] PreDeal, 
+    #[strum(serialize = "predeal")] PreDeal,
     #[strum(serialize = "predraw")] PreDraw, 
     #[strum(serialiez = "postdraw")] PostDraw, 
     #[strum(serialize = "preflop")] PreFlop, 

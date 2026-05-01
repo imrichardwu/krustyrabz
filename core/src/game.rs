@@ -1,13 +1,10 @@
-use poker_core::{Deck,Player, BettingRounds, BettingState, Table}; 
+use poker_core::{Deck,Player, BettingRounds, BettingState, Table, Card}; 
 use strum_macros::EnumString; 
 use std::sync::{Arc, Mutex}; 
 use std::str::FromStr; 
 use std::vec::vec; 
 use uuid::Uuid; 
 
-//TODO Hoist enum types into separate GameType structs
-//TODO Define methods implementing each variant's game logic 
-//TODO      Child process runs game loop 
 pub enum Game {
     #[strum(serialize = "5CD")] FiveCardDraw(FiveCardDraw), 
     #[strum(serialize = "7CS")] SevenCardStud(SevenCardStud), 
@@ -34,10 +31,55 @@ impl FiveCardDraw {
         let mut game_type = GameType::FiveCardDraw //default
     }
 
-   
+    //shuffle 
+    //
+    //deal 
+    //
+    //predraw_betting()
+    //
+    //draw 
+    //
+    //showdown 
+    //
+    //payout 
+    //
+    //reset 
+
+    pub fn shuffle() -> Self {
+        self.deck.shuffle() 
+    }
+
+    pub fn deal() -> Self {
+        for deal in 1..=5 {
+            for player in &mut Table.players {
+                let mut card = self.deck.deal(1);
+                card.card_type = Card::CardType::Private; 
+                *player.hand.push(card); 
+            }
+        }
+    }
+
+    pub fn predraw_betting() -> Self {
+    }
+
+    pub fn draw() -> Self {
+    }
+
+    pub fn postdraw_betting() -> Self {
+    }
+
+    pub fn showdown() -> Self {
+    }
+
+    pub fn payout() -> Self {
+    }
+
+    pub fn reset() -> Self {
+    }
 
     //TODO implement other variant-specific methods 
 }
+
 
 impl SevenCardStud {
     pub fn new() -> Self {
@@ -49,7 +91,14 @@ impl SevenCardStud {
         let mut betting_state = BettingState::new(); 
     }
 
-    //TODO implement other variant-specific methods
+    pub fn shuffle() -> Self {
+        ; 
+    }
+
+    pub fn deal() -> Self {
+        ; 
+    }
+
 }
 
 impl TexasHoldEm { 

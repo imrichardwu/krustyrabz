@@ -1,5 +1,12 @@
 use strum_macros::{Display, EnumIter}; // strum for pretty printing
 
+#[derive(Debug)]
+pub enum CardType {
+    #[strum(to_string = "community")] Community, 
+    #[strum(to_string = "private")] Private, 
+    #[strum(to_string = "up")] Up
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter, Display)]
 pub enum Suit {
     #[strum(to_string = "♣")]
@@ -41,6 +48,7 @@ impl Rank {
 pub struct Card {
     pub rank: Rank, // field_name : Type name (rank is type enum Rank)
     pub suit: Suit,
+    pub card_type: CardType
 }
 
 impl Card {

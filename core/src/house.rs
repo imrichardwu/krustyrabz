@@ -1,8 +1,7 @@
 use std::sync::{Arc, Mutex}; 
 use threadpool::ThreadPool; 
 //TODO need something like use std::
-use std::thread;
-
+use std::thread; 
 
 //dealer-threads let players buy into games 
 const n_floorstaff: usize = 20;
@@ -12,7 +11,7 @@ pub use game::{Game};
 
 pub struct House { 
     pub live_games: vec<Game>;
-    pub floorstaff_pool: ThreadPool //in casinos, floorstaff seat players at open tables
+    pub floorstaff_pool: ThreadPool //in casinos, floorstaff help players find open tables
 }
 
 impl House {
@@ -22,7 +21,7 @@ impl House {
     }
 
     //get connections, add player 
-    //whenever a player enters, a floorstaff/thread 
+    //whenever a player enters, a dealer/thread 
     //is tasked with admitting that player to a game
     //ThreadPool, Arc with mutex 
     pub fn open_doors() {
