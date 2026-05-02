@@ -28,8 +28,7 @@ async fn main() {
                 "1" => {
                     match register().await {
                         Ok(auth_session) => {
-                            session = Some(auth_session);
-                            authenticated = true;
+                            
                         }
                         Err(e) => {
                             println!("Error: {}", e);

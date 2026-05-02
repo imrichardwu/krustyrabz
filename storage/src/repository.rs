@@ -2,6 +2,8 @@ use supabase_rs::SupabaseClient;
 use dotenv::dotenv;
 use std::env;
 use sea_orm::DatabaseConnection;
+use crate::entities::UserAccount;
+use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 
 /// Initialize and return a Supabase client using environment variables
 /// 
@@ -65,6 +67,53 @@ impl Repository {
     /// Get a reference to the SeaORM database connection
     pub fn db(&self) -> &DatabaseConnection {
         &self.db
+    }
+    
+    /// Create a new user account with default values
+    /// 
+    /// # Arguments
+    /// * `username` - The username for the new user
+    /// 
+    /// # Returns
+    /// Returns the created user model or a database error
+    pub async fn create_user(&self, username: String) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+        use crate::entities::UserAccount;
+        use sea_orm::{Set, EntityTrait, QueryFilter, ColumnTrait};
+        
+        let active_model = crate::entities::user_account::ActiveModel {
+            username: Set(username.clone()),
+            token_balance: Set(Some(0.0)),
+            rounds_played: Set(Some(0)),
+            pots_won: Set(Some(0)),
+            number_folds: Set(Some(0)),
+            ..Default::default()
+        };
+        
+        UserAccount::insert(active_model)
+            .exec(&self.db)
+            .await?;
+        
+        // Fetch the created user by username (which is unique)
+        UserAccount::find()
+            .filter(crate::entities::user_account::Column::Username.eq(username))
+            .one(&self.db)
+            .await?
+            .ok_or_else(|| sea_orm::DbErr::RecordNotFound("User not found after creation".to_string()))
+            .map_err(|e| e.into())
+    }
+
+    pub async fn get_user_by_username(&self, username: String) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+        let username_clone = username.clone();
+        
+        let user = UserAccount::find()
+            .filter(crate::entities::user_account::Column::Username.eq(username))
+            .one(&self.db)
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error> { Box::from(e) })?;
+        
+        user.ok_or_else(move || -> Box<dyn std::error::Error> {
+            Box::from(sea_orm::DbErr::RecordNotFound(format!("User with username '{}' not found", username_clone)))
+        })
     }
 }
 

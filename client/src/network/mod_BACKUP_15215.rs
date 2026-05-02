@@ -1,5 +1,4 @@
 pub mod connection;
-<<<<<<< HEAD
 pub mod protocol;
 
 pub use connection::Connection;
@@ -37,7 +36,5 @@ impl std::fmt::Display for NetworkError {
 }
 
 impl std::error::Error for NetworkError {}
-=======
 
 pub use connection::Connection;
->>>>>>> fccd3abb142c7de07150330107a334fe975c0983

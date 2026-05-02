@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use dotenv::dotenv;
 use std::env;
+use storage::Repository;
+
 
 /// Authentication session containing user info and access token
 #[derive(Debug, Clone)]
@@ -111,39 +113,42 @@ pub async fn register() -> Result<AuthSession, String> {
     let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
     
     if status.is_success() {
-        // Try to parse response as AuthResponse
-        match serde_json::from_str::<AuthResponse>(&response_text) {
-            Ok(auth_response) => {
-                // Check if we have tokens directly
-                if let (Some(access_token), Some(refresh_token)) = (auth_response.access_token, auth_response.refresh_token) {
-                    let username_clone = username.clone();
-                    let session = AuthSession {
-                        access_token,
-                        refresh_token,
-                        user_id: auth_response.user.id,
-                        email: auth_response.user.email,
-                        username,
-                    };
-                    println!("User '{}' registered successfully!", username_clone);
-                    return Ok(session);
-                }
-            }
-            Err(_) => {
-                // Response doesn't have tokens, try to login
-            }
-        }
-        
-        // If no tokens in response, login to get them
-        println!("User created! Logging in...");
-        return login_with_credentials(&email, &password).await;
+        let auth_response: AuthResponse = serde_json::from_str(&response_text).map_err(|e| format!("Failed to parse registration response: {}", e))?;
+      
+        let access_token: String = auth_response.access_token.ok_or_else(|| "Registration response missing access token".to_string())?;
+        let refresh_token: String = auth_response.refresh_token.ok_or_else(|| "Registration response missing refresh token".to_string())?;
+
+        let session_username = auth_response.user.user_metadata.and_then(|m| m.get("username").and_then(|v| v.as_str().map(|s| s.to_string()))) .unwrap_or_else(|| username.clone());
+
+        println!("User '{}' registered successfully!", session_username);
+
+        // create user in database
+        let repository = Repository::new().await
+            .map_err(|e| format!("Failed to create repository: {}", e))?;
+        let _user = repository.create_user(session_username.clone())
+            .await
+            .map_err(|e| format!("Failed to create user in database: {}", e))?;
+
+        Ok(AuthSession {
+            access_token,
+            refresh_token,
+            user_id: auth_response.user.id,
+            email: auth_response.user.email,
+            username: session_username,
+        })
     } else {
         // Registration failed - get error message
         match serde_json::from_str::<AuthError>(&response_text) {
-            Ok(error) => Err(format!("Registration failed: {}", error.message)),
-            Err(_) => Err(format!("Registration failed with status {}: {}", status, response_text)),
+            Ok(error) => {
+                Err(format!("Registration failed: {}", error.message))
+            }
+            Err(_) => {
+                Err(format!("Registration failed with status {}: {}", status, response_text))
+            }
         }
     }
 }
+
 
 /// Internal helper to login with credentials (used after Admin API user creation)
 async fn login_with_credentials(email: &str, password: &str) -> Result<AuthSession, String> {
@@ -187,6 +192,8 @@ async fn login_with_credentials(email: &str, password: &str) -> Result<AuthSessi
             .user_metadata
             .and_then(|m| m.get("username").and_then(|v| v.as_str().map(|s| s.to_string())))
             .unwrap_or_else(|| "User".to_string());
+
+
         
         Ok(AuthSession {
             access_token,
