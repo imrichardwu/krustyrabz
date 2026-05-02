@@ -10,7 +10,9 @@ pub enum BetAction {
 }
 
 pub enum BettingOutcome {
-    Continue, // next player acts
-    BettingRoundComplete,
-    HandComplete { winner: Uuid },
+    MatchedHighestBet, 
+    Folded
+    //Continue, // next player acts
+    //BettingRoundComplete,
+    //HandComplete { winner: Uuid },
 }

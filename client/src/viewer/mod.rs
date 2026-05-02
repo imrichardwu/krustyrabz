@@ -1,4 +1,28 @@
 // viewer/mod.rs
+use crate::player::PlayerStatistics;
+
+// Placeholder types for game updates and table state
+#[derive(Debug)]
+pub struct GameUpdate {
+    pub table_id: u32,
+    pub message: String,
+}
+
+#[derive(Debug)]
+pub struct TableState {
+    pub table_id: u32,
+    pub player_count: u32,
+}
+
+impl TableState {
+    pub fn new() -> Self {
+        TableState {
+            table_id: 0,
+            player_count: 0,
+        }
+    }
+}
+
 pub struct Viewer {
     username: String,
     watched_table_id: u32,
@@ -33,13 +57,13 @@ impl Viewer {
      }
     
     // Request player statistics
-    pub fn get_statistics(&self, player_id: u32) -> Result<PlayerStats, String> {
+    pub fn get_statistics(&self, player_id: u32) -> Result<PlayerStatistics, String> {
         println!("Requested statistics for player: {}", player_id);
-        Ok(PlayerStats::new())
+        Ok(PlayerStatistics::new())
     }
     
     // Disconnect from table
-    pub fn leave_table(&mut self) -> Result<()> { 
+    pub fn leave_table(&mut self) -> Result<(), String> { 
         self.watched_table_id = 0;
         self.connected = false;
         Ok(())

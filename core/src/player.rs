@@ -1,4 +1,5 @@
 use crate::card::Card;
+use crate::betting::{BetAction, BettingOutcome};
 use crate::hand::DeckTrait;
 use uuid::Uuid;
 
@@ -35,4 +36,8 @@ impl Player {
 
         Ok(())
     }
+
+   pub fn get_action(&self) -> () {
+    todo!()
+   }
 }

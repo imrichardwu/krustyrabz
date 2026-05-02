@@ -32,7 +32,7 @@ impl PlayerStatistics {
     /// Record a game won with winnings amount
     pub fn record_win(&mut self, winnings: u64) {
         self.games_won += 1;
-        self.total_winnings += winnings;
+        self.total_winnings += winnings as i64;
         if winnings > self.biggest_win {
             self.biggest_win = winnings;
         }
