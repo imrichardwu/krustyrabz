@@ -1,4 +1,4 @@
-use poker_core::{Card, Rank, Suit, DeckTrait};
+use poker_core::{Card, Rank, Suit, CardType, DeckTrait};
 use rand::seq::SliceRandom;
 use strum::IntoEnumIterator;
 
@@ -11,7 +11,7 @@ impl Deck {
         let mut cards = Vec::with_capacity(52);
         for suit in Suit::iter(){
             for rank in Rank::iter(){
-                cards.push(Card::construct(rank, suit))
+                cards.push(Card::construct(rank, suit, CardType::Community))
             }
         }
         Self { cards }

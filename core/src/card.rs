@@ -1,6 +1,6 @@
 use strum_macros::{Display, EnumIter}; // strum for pretty printing
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Display)]
 pub enum CardType {
     #[strum(to_string = "community")] Community, 
     #[strum(to_string = "private")] Private, 
@@ -52,8 +52,8 @@ pub struct Card {
 }
 
 impl Card {
-    pub fn construct(rank: Rank, suit: Suit) -> Self {
-        Self { rank, suit }
+    pub fn construct(rank: Rank, suit: Suit, card_type: CardType) -> Self {
+        Self { rank, suit, card_type }
     }
 
     //Display implementation from strum can now be used directly here

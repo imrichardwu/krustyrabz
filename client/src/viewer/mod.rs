@@ -16,7 +16,6 @@ impl Viewer {
     
     // Connect to a specific table
     pub fn join_table(&mut self, table_id: u32) -> Result<(), String> { 
-    pub fn join_table(&mut self, table_id: u32) -> Result<()> { 
         self.watched_table_id = table_id;
         self.connected = true;
         Ok(())
@@ -28,14 +27,13 @@ impl Viewer {
      }
     
     // Request current game state
-    pub fn get_table_state(&self) -> Result<TableState> {
+    pub fn get_table_state(&self) -> Result<TableState, String> {
         println!("Requested table state for table: {}", self.watched_table_id);
         Ok(TableState::new())
      }
     
     // Request player statistics
     pub fn get_statistics(&self, player_id: u32) -> Result<PlayerStats, String> {
-    pub fn get_statistics(&self, player_id: u32) -> Result<PlayerStats> {
         println!("Requested statistics for player: {}", player_id);
         Ok(PlayerStats::new())
     }

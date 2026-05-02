@@ -3,8 +3,18 @@ name = "storage"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "migrate"
+path = "src/bin/migrate.rs"
+
 [dependencies]
 poker_core = { path = "../core" }
 serde = { version = "1.0", features = ["derive"] }
-diesel = { version = "2.2.0", features = ["postgres"]}
+sea-orm = { version = "0.12", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "chrono"] }
+tokio = { version = "1", features = ["full"] }
 supabase_rs = "=0.5.1"
+dotenv = "0.15"
+serde_json = "1.0"
+async-trait = "0.1"
+sea-orm-migration = { version = "0.12", features = ["sqlx-postgres", "runtime-tokio-rustls"] }

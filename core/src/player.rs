@@ -10,7 +10,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(chips: u32, id: Uuid) -> Self {
+    pub fn new(chips: u32, id: Uuid, game_id: u32) -> Self {
         Self {
             id,
             hand: Vec::new(),
