@@ -13,10 +13,10 @@ impl Table {
         &self.players.len(); 
     }
 
-    pub fn seat_player_at_table(&self, &Player) -> Result<(), &'static str> {
+    pub fn seat_player(&self, &Player) -> Result<(), &'static str> {
         let count = &self.get_player_count(); 
         if (count < 5) {
-                players.push(Player); 
+                players.push(*Player); 
                 Ok(());
         }
         else {

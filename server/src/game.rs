@@ -1,4 +1,4 @@
-use poker_core::{Deck,Player, Table, Card}; 
+use poker_core::{Deck,Player, Table, Card, BetAction, BettingOutcome}; 
 use crate::betting::{BettingRounds, BettingState};
 use strum_macros::EnumString; 
 use std::sync::{Arc, Mutex}; 
@@ -22,7 +22,9 @@ pub struct FiveCardDraw {
     pub table Table, 
     pub pot u32, 
     pub betting_rounds: BettingRounds, 
-    pub betting_state: BettingState
+    pub betting_state: BettingState, 
+    pub game_type: Game, 
+    pub action_on: Option<Player> //active player
 }
 
 impl FiveCardDraw {
@@ -33,7 +35,7 @@ impl FiveCardDraw {
         let mut table = Table::new(); 
         let mut betting_rounds = BettingRounds::PreDeal;  
         let mut betting_state = BettingState::new(); 
-        let mut game_type = GameType::FiveCardDraw //default
+        let mut game_type = Game::FiveCardDraw; //default
     }
 
     //Round - Step 1

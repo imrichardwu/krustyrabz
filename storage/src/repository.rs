@@ -3,6 +3,7 @@ use dotenv::dotenv;
 use std::env;
 use sea_orm::DatabaseConnection;
 use crate::entities::UserAccount;
+use crate::entities::user_account;
 use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 
 /// Initialize and return a Supabase client using environment variables
@@ -115,6 +116,62 @@ impl Repository {
             Box::from(sea_orm::DbErr::RecordNotFound(format!("User with username '{}' not found", username_clone)))
         })
     }
+
+    //pass negative to decrease and positive to increase 
+    pub async fn update_user_token_balance(&self, username: String, amount: f64) -> Result<Model, Box<dyn std::error::Error>> { 
+          let username_clone = username.clone();
+          let update_result: crate::entities::user_account::Entity::update_many()
+              .col_exprs(crate::entities::user_account::Column::token_balance, Expr::col(crate::entities::user_account::Column::token_balance).add(amount))
+              .filter(crate::entities::user_account::Column::Username.eq(username))
+              .exec(db)
+              .await?
+              .ok_or_else(|| sea_orm::DbErr::RecordNotUpdated(format!("Failed to update token_balance for username '{}'", username_clone).to_string()))
+            .map_err(|e| e.into()); 
+}
+//could try to use generics to condense into single update method but it doesn't really matter for 4
+//attributes
+    pub async fn increase_rounds_played(&self, username: String, rounds: i32) -> Result<Model, Box<dyn std::error::Error>> { 
+          if amount < 0 {
+            return Err(format!("Parameter error: amount can only be >= 0, but '{}' passed instead", amount));  
+          }
+          let username_clone = username.clone();
+          let update_result: crate::entities::user_account::Entity::update_many()
+              .col_exprs(crate::entities::user_account::Column::rounds_played, Expr::col(crate::entities::user_account::Column::rounds_played).add(rounds))
+              .filter(crate::entities::user_account::Column::Username.eq(username))
+              .exec(db)
+              .await?
+              .ok_or_else(|| sea_orm::DbErr::RecordNotUpdated(format!("Failed to update rounds_played for username '{}'", username_clone).to_string()))
+            .map_err(|e| e.into()); 
+}
+
+//could try to use generics to condense into single update method but it doesn't really matter for 4
+//attributes
+    pub async fn increase_pots_won(&self, username: String, pots: i32) -> Result<Model, Box<dyn std::error::Error>> { 
+          if amount < 0 {
+            return Err(format!("Parameter error: amount can only be >= 0, but '{}' passed instead", amount));  
+          }
+          let username_clone = username.clone();
+          let update_result: crate::entities::user_account::Entity::update_many()
+              .col_exprs(crate::entities::user_account::Column::pots_won, Expr::col(crate::entities::user_account::Column::pots_won).add(pots))
+              .filter(crate::entities::user_account::Column::Username.eq(username))
+              .exec(db)
+              .await?
+              .ok_or_else(|| sea_orm::DbErr::RecordNotUpdated(format!("Failed to update pots_won for username '{}'", username_clone).to_string()))
+            .map_err(|e| e.into()); 
+}
+
+    pub async fn increase_number_folds(&self, username: String, folds: i32) -> Result<Model, Box<dyn std::error::Error>> { 
+          if amount < 0 {
+            return Err(format!("Parameter error: amount can only be >= 0, but '{}' passed instead", amount));  
+          }
+          let username_clone = username.clone();
+          let update_result: crate::entities::user_account::Entity::update_many()
+              .col_exprs(crate::entities::user_account::Column::number_folds, Expr::col(crate::entities::user_account::Column::number_folds.add(folds))
+              .filter(crate::entities::user_account::Column::Username.eq(username))
+              .exec(db)
+              .await?
+              .ok_or_else(|| sea_orm::DbErr::RecordNotUpdated(format!("Failed to update pots_won for username '{}'", username_clone).to_string()))
+            .map_err(|e| e.into()); 
 }
 
 // Example usage functions - adjust based on supabase_rs API documentation
