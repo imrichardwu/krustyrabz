@@ -37,6 +37,7 @@ impl FiveCardDraw {
         let mut betting_round = BettingRound::PreDeal;  
         let mut betting_state = BettingState::new(); 
         let mut game_type = Game::FiveCardDraw; //default
+        let mut action_on = Player::new(); 
     }
 
     //Round - Step 1
