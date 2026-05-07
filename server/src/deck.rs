@@ -2,6 +2,7 @@ use poker_core::{Card, Rank, Suit, CardType, DeckTrait};
 use rand::seq::SliceRandom;
 use strum::IntoEnumIterator;
 
+#[derive(Debug, Clone)]
 pub struct Deck {
     pub cards: Vec<Card>,
 }

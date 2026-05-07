@@ -1,22 +1,35 @@
-//pub mod deck;
-//use deck::{Deck};
-
-//fn main() {
-    //let deck = Deck::standard();
-    //println!("Deck has {} cards", deck.cards.len());
-    //println!("First: {:?}, last: {:?}", deck.cards[0], deck.cards[51]);
-//}
+// Poker Server Main Entry Point
 //
+// This is the main entry point for the poker game server.
+// The server acts as the "house" and manages poker games.
 
-#[macro_use] extern crate rocket; 
-use rocket::{Rocket, Build};
+#[macro_use]
+extern crate rocket;
 
-#[get("/")] 
-fn index() -> &'static str { 
-    "Mein fuhrer, I can walk!" 
-}
+pub mod deck;
+pub mod betting;
+pub mod house;
 
-#[launch] 
-fn rocket() -> Rocket<Build> { 
-    rocket::build().mount("/", routes![index])
+use house::House;
+
+/// Launches the server with the House state and all routes mounted.
+#[launch]
+fn rocket() -> _ {
+    rocket::build()
+        .manage(House::new())
+        .mount(
+            "/",
+            routes![
+                house::index,
+                house::list_games,
+                house::create_game,
+                house::join_game,
+                house::get_game,
+                house::get_stats,
+                house::register_viewer,
+                house::get_rules,
+                house::open_floor,
+                house::game,
+            ],
+        )
 }
