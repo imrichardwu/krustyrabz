@@ -48,7 +48,8 @@ pub struct House {
 
 impl House {
     pub fn new() -> Self {
-        //must clone 
+        //must clone
+        //consider factoring out into separate game_type discriminated groups  
         let pending_games:     Arc::new(Mutex::new(vec![])); 
         let twoplayer_games:   Arc::new(Mutex::new(vec![])); 
         let threeplayer_games: Arc::new(Mutex::new(vec![])); 
@@ -83,27 +84,81 @@ impl House {
         }
     }
 
-    // Helper method, locks the games data structure specified by games and 
-    // attempts to add a new player to it. 
+    // Helper method, locks the games data structure specified by search and 
+    // attempts to locate a free game inside it. 
+    //
+    // If optional parameter game_id is supplied, attempts to add a player to the 
+    // game specified by that id. On success, invalidates the search group, 
+    // removing the game with incremented player count and relocating it to target. 
+    //
+    // If no optional parameter is supplied, finds the first free game and adds 
+    // the player to it, then moves that game to the group with incremented player 
+    // counts. 
     //
     // Parameters: 
     //      Player    - the player to add 
-    //      games     - the group of games to search 
+    //      search    - the group of games to search 
+    //      target    - the group of games to target 
     //      game_type - the type of game requested by the player
+    //      game_id   - optional, if adding the player to a specific game
     //
     // Returns: 
     //      Result<String, &'static String> 
-    pub fn lock_and_add(&mut self, player: &Player, games_original: &Arc<Mutex<Vec<Game>>>, game_type: String) Result<String, &'static String> { 
-       let games = games_original.clone(); 
-       let mut locked_games = games.lock().unwrap(); 
-       for &mut game in locked_games { 
-            if game.game_type.to_string() == game_type { 
-                let outcome = game.table.seat_player(&Player) { 
-                    Ok(()) => return(game.game_id), 
-                    Err(error) => Err(format!("Failed adding player {} to game of type {}", player.id, game_type)); 
+    pub fn lock_add_and_move(&mut self, player: &Player, 
+                                   search: &Arc<Mutex<Vec<Game>>>, 
+                                   target: &Arc<Mutex<Vec<Game>>>, 
+                                   game_type: String, 
+                                   game_id Option<String>) Result<String, &'static String> {
+
+       match game_id { 
+           Some(value) => {
+                    let search_group = search.clone(); 
+                    let mut locked_search_group = search_group.lock.unwrap(); 
+                    for game in locked_search_group.iter_mut() { 
+                        if game.game_id == game_id { 
+                            match game.table.seat_player(&player) { 
+                                Ok(()) => { 
+                                    let target_group = target.clone(); 
+                                    let mut locked_target_group = target_group.lock.unwrap(); 
+                                    locked_target_group.push(game); 
+                                    locked_search_group.retain(|&g| g.game_id != game_id); 
+                                    return Ok(game.game_Id) 
+                                }, 
+                                Err(_) => { continue } 
+                            }
+                        }
+                    }
+           }, 
+           None => {
+                    let search_group = search.clone(); 
+                    let mut locked_search_group = search_group.lock.unwrap(); 
+                    for game in locked_search_group.iter_mut() { 
+                        if game.game_type.to_string() == game_type { 
+                            match game.table.seat_player(&player) { 
+                                Ok(()) => {
+                                    let target_group = target.clone(); 
+                                    let mut locked_target_group = target_group.lock.unwrap(); 
+                                    locked_target_group.push(game); 
+                                    locked_search_group.retain(|&g| g.game_id != game_id); 
+                                    return Ok(game.game_Id) 
+                                }
+                                Err(_) => { continue } 
+                        }
+                    }
                 }
             }
        } 
+       return Err(format!("Failed adding player {} to game of type {}", player.id, game_type));
+    }
+
+    // Helper method, on client disconnect, removes the dropped player from the game 
+    // and relocates that game to the group with decremented player counts. 
+    //
+    // Parameters: 
+    //      player  - the player to remove from the table 
+    //      game    - the game to remove the player from
+    //      target  - the group to move the game into after reducing its player count
+    pub fn remove_player_from(game: &mut Game, player: &Player, target: &Arc<Mutex<Vec<Game>>>) {
     }
 
     //TODO GIVE PLAYER OPTION TO SELECT A GAME FROM HOME SCREEN
@@ -122,30 +177,34 @@ impl House {
     //      Result<String, 'static String> 
     //      
     pub fn find_player_an_open_table(&mut self, player: &Player, game_type: String) Result<Uuid, &'static String>{
-        if &House.pending_games.len() > 0 { 
-            let games = &House.pending_games; 
-            lock_and_add(player, games, game_type); 
+        if &self.pending_games.len() > 0 { 
+            let from_one_player  = &House.pending_games; 
+            let into_two_players = &House.twoplayer_games; 
+            lock_add_and_move(player, from_one_player, into_two_players, game_type); 
             Ok(())
         }
-        else if &House.twoplayer_games.len() > 0 {
-            let games_original = &House.twoplayer_games; 
-            lock_and_add(player, games, game_type);
+        else if &self.twoplayer_games.len() > 0 {
+            let from_two_players     = &House.twoplayer_games; 
+            let into_three_players   = &House.threeplayer_games; 
+            lock_add_and_move(player, from_two_players, into_three_players, game_type);
             Ok(())
         }
-        else if &House.threeplayer_games.len() > 0 { 
-            let games_original = &House.threeplayer_games; 
-            lock_and_add(player, games, game_type); 
+        else if &self.threeplayer_games.len() > 0 { 
+            let from_three_players = &House.threeplayer_games; 
+            let into_four_players  = &House.fourplayer_games; 
+            lock_add_and_move(player, from_three_players, into_four_players, game_type); 
             Ok(())
         }
-        else if &House.fourplayer_games.len() > 0 {
-            let games_original = &House.fourplayer_games; 
-            lock_and_add(player, games, game_type); 
+        else if &self.fourplayer_games.len() > 0 {
+            let from_four_players = &House.fourplayer_games; 
+            let into_five_players = &House.fiveplayer_games; 
+            lock_add_and_move(player, from_four_players, into_five_players, game_type); 
             Ok(())
         }
         else {
             //if no game of the requested type is found, create a new one
             //and add the player to it
-            let new_game = self.create_new(game_type); 
+            let mut new_game = self.create_new(game_type); 
             new_game.table.seat_player(player); 
             let mut locked_games = games.clone()
                                         .lock()
@@ -176,13 +235,13 @@ fn open_casino() -> _ {
         .mount("/game/<game_id>", routes![game])
 }
 
-/// Helper method. Produces formatted strings for sending to the client. 
-/// 
-/// Parameters: 
-///     game - the game to convert to a formatted string 
-///
-/// Returns: 
-///     a formatted string representation of the input game 
+// Helper method. Produces formatted strings for sending to the client. 
+// 
+// Parameters: 
+//     game - the game to convert to a formatted string 
+//
+// Returns: 
+//     a formatted string representation of the input game 
 pub fn game_to_string(active_game: &Game) { 
     return format!("""
 
@@ -221,19 +280,19 @@ pub fn game_to_string(active_game: &Game) {
 async fn open_floor(ws: ws::WebSocket, gametype: String, username: String, state: &State<House>) -> ws::Channel<'static> {
     let mut display_pending_games = String::from("======== WAITING TO PLAY ========");
     let house = *state.clone(); 
-    for &pending_game in house.pending_games {
-        display_pending_games += game_to_string(pending_game); 
+    for pending_game in &house.pending_games {
+        display_pending_games += game_to_string(&pending_game); 
     }
 
     let mut display_active_games =  String::from("========  GAMES IN PLAY ========="); 
-    for &active_game in house.twoplayer_games {         
-        display_active_games += game_to_string(active_game);
+    for active_game in &house.twoplayer_games {         
+        display_active_games += game_to_string(&active_game);
     }
-    for &active_game in house.threeplayer_games { 
-        display_active_games += game_to_string(active_game); 
+    for active_game in &house.threeplayer_games { 
+        display_active_games += game_to_string(&active_game); 
     }
-    for &active_game in house.fourplayer_games { 
-        display_active_games += game_to_string(active_game); 
+    for active_game in &house.fourplayer_games { 
+        display_active_games += game_to_string(&active_game); 
     }
     display_all_games = display_pending_games + display_active_games;
     
