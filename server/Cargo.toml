@@ -4,13 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# We link to the folder 'core', but the package name inside is 'poker_core'
 poker_core = { path = "../core" }
-protocol = { path = "../protocol" }
 storage = { path = "../storage" }
-rand = "0.9.2"
+rand = "0.9"
 strum = "0.27"
-rocket = { version = "0.5.1", features = ["json"] }
-ws = { package = "rocket_ws", version = "0.1.1" } 
-uuid = { version = "1.0", features = ["v4"] }
+rocket = { version = "0.5", features = ["json"] }
+rocket_ws = "0.1"
+uuid = { version = "1.0", features = ["v4", "serde"] }
 futures-util = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }

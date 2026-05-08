@@ -1,12 +1,19 @@
+mod api;
 mod games;
-mod lib;
 mod authentication;
 mod viewer;
 mod player;
 
-use lib::banner;
+use crate::api::PokerClient;
 use games::{five_card_draw, seven_card_stud, texas_holdem};
 use authentication::{login, register, AuthSession};
+
+fn banner(text: &str) {
+    let width = text.len() + 6;
+    println!("{}", "=".repeat(width));
+    println!("== {} ==", text);
+    println!("{}", "=".repeat(width));
+}
 
 #[tokio::main]
 async fn main() {
