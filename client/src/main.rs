@@ -20,6 +20,7 @@ async fn main() {
     banner("Welcome to KrustyRabz Poker");
     let mut authenticated = false;
     let mut session: Option<AuthSession> = None;
+    let client = PokerClient::localhost();
     
     loop {
         if !authenticated {
@@ -35,7 +36,8 @@ async fn main() {
                 "1" => {
                     match register().await {
                         Ok(auth_session) => {
-                            
+                            session = Some(auth_session);
+                            authenticated = true;
                         }
                         Err(e) => {
                             println!("Error: {}", e);
@@ -75,9 +77,9 @@ async fn main() {
             std::io::stdin().read_line(&mut choice).expect("Failed to read line");
 
             match choice.trim() {
-                "1" => five_card_draw(),
-                "2" => seven_card_stud(),
-                "3" => texas_holdem(),
+                "1" => five_card_draw(&client, session.as_ref().unwrap()).await,
+                "2" => seven_card_stud(&client, session.as_ref().unwrap()).await,
+                "3" => texas_holdem(&client, session.as_ref().unwrap()).await,
                 "4" => {
                     session = None;
                     authenticated = false;

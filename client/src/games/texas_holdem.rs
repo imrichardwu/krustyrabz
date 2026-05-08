@@ -1,5 +1,7 @@
 use crate::banner;
+use crate::api::PokerClient;
+use crate::authentication::AuthSession;
 
-pub fn texas_holdem() {
-    banner("Texas Hold'em Poker");
+pub async fn texas_holdem(client: &PokerClient, session: &AuthSession) {
+    
 }
