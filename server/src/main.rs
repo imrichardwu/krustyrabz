@@ -9,6 +9,10 @@ extern crate rocket;
 pub mod deck;
 pub mod betting;
 pub mod house;
+pub mod player;
+pub mod table;
+pub mod protocol;
+pub mod game;
 
 use house::House;
 
