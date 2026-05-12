@@ -5,14 +5,108 @@ mod viewer;
 mod player;
 
 use crate::api::PokerClient;
-use games::{five_card_draw, seven_card_stud, texas_holdem};
+use games::game_settings;
 use authentication::{login, register, AuthSession};
+use viewer::watch_game;
+use poker_core::{GameType, GameStatus};
+use client::read_input;
 
 fn banner(text: &str) {
     let width = text.len() + 6;
     println!("{}", "=".repeat(width));
     println!("== {} ==", text);
     println!("{}", "=".repeat(width));
+}
+
+async fn list_and_join_games(client: &PokerClient, session: &AuthSession) {
+    // List all games
+    match client.list_games().await {
+        Ok(response) => {
+            println!("\n=== Available Games ===");
+            if response.games.is_empty() {
+                println!("No games available. Create one from the main menu!");
+                return;
+            }
+            
+            println!(
+                "{:<5} {:<40} {:<18} {:<10} {:<10}",
+                "#", "Game ID", "Type", "Players", "Status"
+            );
+            println!("{}", "-".repeat(83));
+
+            for (idx, game) in response.games.iter().enumerate() {
+                let status = match game.status {
+                    GameStatus::WaitingForPlayers => "Waiting",
+                    GameStatus::InProgress => "In Progress",
+                    GameStatus::Finished => "Finished",
+                };
+                println!(
+                    "{:<5} {:<40} {:<18} {}/{:<7} {:<10}",
+                    idx + 1,
+                    game.game_id,
+                    game.game_type,
+                    game.player_count,
+                    game.max_players,
+                    status
+                );
+            }
+            
+            println!("\nEnter game number to join (or 0 to go back):");
+            let choice = read_input("Choice: ");
+            
+            match choice.trim().parse::<usize>() {
+                Ok(0) => {
+                    println!("Returning to main menu...");
+                    return;
+                }
+                Ok(num) if num > 0 && num <= response.games.len() => {
+                    let selected_game = &response.games[num - 1];
+                    if let Err(e) = game_settings::join_and_play_game(
+                        client,
+                        session,
+                        &selected_game.game_id,
+                        selected_game.game_type,
+                    ).await {
+                        println!("Error joining game: {}", e);
+                    }
+                }
+                _ => {
+                    println!("Invalid choice.");
+                }
+            }
+        }
+        Err(e) => {
+            println!("Error listing games: {}", e);
+        }
+    }
+}
+
+async fn create_new_game(client: &PokerClient, session: &AuthSession) {
+    println!("\n=== Create New Game ===");
+    println!("1. Five Card Draw");
+    println!("2. Seven Card Stud");
+    println!("3. Texas Hold'em");
+    println!("4. Back to Main Menu");
+    
+    let choice = read_input("Choose game type: ");
+    
+    let game_type = match choice.trim() {
+        "1" => GameType::FiveCardDraw,
+        "2" => GameType::SevenCardStud,
+        "3" => GameType::TexasHoldEm,
+        "4" => {
+            println!("Returning to main menu...");
+            return;
+        }
+        _ => {
+            println!("Invalid choice.");
+            return;
+        }
+    };
+    
+    if let Err(e) = game_settings::create_and_play_game(client, session, game_type).await {
+        println!("Error creating game: {}", e);
+    }
 }
 
 #[tokio::main]
@@ -66,10 +160,10 @@ async fn main() {
                 println!("\n=== Welcome, {}! ===", s.username);
             }
             
-            println!("\n=== Game Selection ===");
-            println!("1. Five Card Draw");
-            println!("2. Seven Card Stud");
-            println!("3. Texas Hold'em");
+            println!("\n=== Main Menu ===");
+            println!("1. List & Join Games");
+            println!("2. Create New Game");
+            println!("3. Watch a Game");
             println!("4. Logout");
             println!("5. Exit");
 
@@ -77,9 +171,9 @@ async fn main() {
             std::io::stdin().read_line(&mut choice).expect("Failed to read line");
 
             match choice.trim() {
-                "1" => five_card_draw(&client, session.as_ref().unwrap()).await,
-                "2" => seven_card_stud(&client, session.as_ref().unwrap()).await,
-                "3" => texas_holdem(&client, session.as_ref().unwrap()).await,
+                "1" => list_and_join_games(&client, session.as_ref().unwrap()).await,
+                "2" => create_new_game(&client, session.as_ref().unwrap()).await,
+                "3" => watch_game(&client, session.as_ref().unwrap()).await,
                 "4" => {
                     session = None;
                     authenticated = false;

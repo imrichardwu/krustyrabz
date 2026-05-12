@@ -1,6 +1,7 @@
-// Five Card Draw - Client Game Interface
+// Common game logic shared across all poker variants
 //
-// This module provides the CLI interface for playing Five Card Draw poker.
+// This module contains reusable functions for creating, joining, listing,
+// and playing poker games regardless of the variant.
 
 use crate::api::PokerClient;
 use crate::api::client::ApiError;
@@ -8,53 +9,22 @@ use crate::authentication::AuthSession;
 use poker_core::{BettingRound, GameStateUpdate, GameStatus, GameType};
 use client::read_input;
 
-/// Main entry point for Five Card Draw game.
-pub async fn five_card_draw(client: &PokerClient, session: &AuthSession) {
-    println!("\n{}", "=".repeat(50));
-    println!("        FIVE CARD DRAW POKER");
-    println!("{}", "=".repeat(50));
-
-    loop {
-        println!("\n=== Five Card Draw Menu ===");
-        println!("1. Create New Game");
-        println!("2. Join Existing Game");
-        println!("3. List Available Games");
-        println!("4. Back to Main Menu");
-
-        let choice = read_input("Choice: ");
-
-        match choice.trim() {
-            "1" => {
-                if let Err(e) = create_and_play_game(client, session).await {
-                    println!("Error: {}", e);
-                }
-            }
-            "2" => {
-                let game_id = read_input("Enter Game ID: ");
-                if let Err(e) = join_and_play_game(client, session, game_id.trim()).await {
-                    println!("Error: {}", e);
-                }
-            }
-            "3" => {
-                if let Err(e) = list_games(client).await {
-                    println!("Error: {}", e);
-                }
-            }
-            "4" => {
-                println!("Returning to main menu...");
-                return;
-            }
-            _ => println!("Invalid choice, please try again."),
-        }
-    }
-}
-
 /// Create a new game and enter the game loop.
-async fn create_and_play_game(client: &PokerClient, session: &AuthSession) -> Result<(), ApiError> {
-    println!("\nCreating new Five Card Draw game...");
+pub async fn create_and_play_game(
+    client: &PokerClient,
+    session: &AuthSession,
+    game_type: GameType,
+) -> Result<(), ApiError> {
+    let game_name = match game_type {
+        GameType::FiveCardDraw => "Five Card Draw",
+        GameType::SevenCardStud => "Seven Card Stud",
+        GameType::TexasHoldEm => "Texas Hold'em",
+    };
+    
+    println!("\nCreating new {} game...", game_name);
 
     let response = client
-        .create_game(&session.user_id, &session.username, GameType::FiveCardDraw)
+        .create_game(&session.user_id, &session.username, game_type)
         .await?;
 
     if !response.success {
@@ -65,14 +35,15 @@ async fn create_and_play_game(client: &PokerClient, session: &AuthSession) -> Re
     println!("Game created! Game ID: {}", game_id);
     println!("Waiting for other players to join...");
 
-    game_loop(client, session, &game_id).await
+    game_loop(client, session, &game_id, game_type).await
 }
 
 /// Join an existing game and enter the game loop.
-async fn join_and_play_game(
+pub async fn join_and_play_game(
     client: &PokerClient,
     session: &AuthSession,
     game_id: &str,
+    game_type: GameType,
 ) -> Result<(), ApiError> {
     println!("\nJoining game {}...", game_id);
 
@@ -86,11 +57,11 @@ async fn join_and_play_game(
 
     println!("Successfully joined game!");
 
-    game_loop(client, session, game_id).await
+    game_loop(client, session, game_id, game_type).await
 }
 
 /// List all available games.
-async fn list_games(client: &PokerClient) -> Result<(), ApiError> {
+pub async fn list_games(client: &PokerClient) -> Result<(), ApiError> {
     let response = client.list_games().await?;
 
     println!("\n=== Available Games ===");
@@ -119,11 +90,14 @@ async fn list_games(client: &PokerClient) -> Result<(), ApiError> {
 }
 
 /// Main game loop - displays state and handles player actions.
-async fn game_loop(
+pub async fn game_loop(
     client: &PokerClient,
     session: &AuthSession,
     game_id: &str,
+    game_type: GameType,
 ) -> Result<(), ApiError> {
+    let has_draw_phase = matches!(game_type, GameType::FiveCardDraw);
+    
     loop {
         // Get current game state
         let state = client.get_game(game_id, &session.user_id).await?;
@@ -145,8 +119,13 @@ async fn game_loop(
         println!("4. Call");
         println!("5. Bet");
         println!("6. Raise");
-        println!("7. Draw Cards (discard and draw new)");
-        println!("8. Leave Game");
+        
+        if has_draw_phase {
+            println!("7. Draw Cards (discard and draw new)");
+            println!("8. Leave Game");
+        } else {
+            println!("7. Leave Game");
+        }
 
         let choice = read_input("Choice: ");
 
@@ -155,15 +134,9 @@ async fn game_loop(
                 println!("Refreshing...");
                 continue;
             }
-            "2" => {
-                client.fold(&session.user_id, game_id).await
-            }
-            "3" => {
-                client.check(&session.user_id, game_id).await
-            }
-            "4" => {
-                client.call(&session.user_id, game_id).await
-            }
+            "2" => client.fold(&session.user_id, game_id).await,
+            "3" => client.check(&session.user_id, game_id).await,
+            "4" => client.call(&session.user_id, game_id).await,
             "5" => {
                 let amount = read_input("Enter bet amount: ");
                 match amount.trim().parse::<u32>() {
@@ -185,27 +158,37 @@ async fn game_loop(
                 }
             }
             "7" => {
-                println!("Enter card positions to discard (1-5), separated by spaces.");
-                println!("Example: '1 3 5' discards cards 1, 3, and 5");
-                let input = read_input("Discard: ");
-                let indices: Vec<usize> = input
-                    .trim()
-                    .split_whitespace()
-                    .filter_map(|s| s.parse::<usize>().ok())
-                    .filter(|&n| n >= 1 && n <= 5)
-                    .map(|n| n - 1) // Convert to 0-indexed
-                    .collect();
+                if has_draw_phase {
+                    println!("Enter card positions to discard (1-5), separated by spaces.");
+                    println!("Example: '1 3 5' discards cards 1, 3, and 5");
+                    let input = read_input("Discard: ");
+                    let indices: Vec<usize> = input
+                        .trim()
+                        .split_whitespace()
+                        .filter_map(|s| s.parse::<usize>().ok())
+                        .filter(|&n| n >= 1 && n <= 5)
+                        .map(|n| n - 1) // Convert to 0-indexed
+                        .collect();
 
-                if indices.len() > 3 {
-                    println!("You can only discard up to 3 cards!");
-                    continue;
+                    if indices.len() > 3 {
+                        println!("You can only discard up to 3 cards!");
+                        continue;
+                    }
+
+                    client.draw(&session.user_id, game_id, indices).await
+                } else {
+                    println!("Leaving game...");
+                    break;
                 }
-
-                client.draw(&session.user_id, game_id, indices).await
             }
             "8" => {
-                println!("Leaving game...");
-                break;
+                if has_draw_phase {
+                    println!("Leaving game...");
+                    break;
+                } else {
+                    println!("Invalid choice");
+                    continue;
+                }
             }
             _ => {
                 println!("Invalid choice");
@@ -232,7 +215,7 @@ async fn game_loop(
 }
 
 /// Display the current game state.
-fn display_game_state(state: &GameStateUpdate, _my_player_id: &str) {
+pub fn display_game_state(state: &GameStateUpdate, _my_player_id: &str) {
     println!("\n{}", "=".repeat(60));
     println!("  GAME: {} | POT: ${}", state.game_id, state.pot);
     println!("  Round: {} | Current Bet: ${}", state.betting_round, state.current_bet);

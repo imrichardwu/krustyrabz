@@ -1,71 +1,154 @@
-// viewer/mod.rs
-use crate::player::PlayerStatistics;
+// Viewer module: watch a game without playing.
+//
+// - Viewer = client that is not playing but can watch game activity and request results.
+// - Flow: list games → pick game → register as viewer → poll public game state (read-only).
+// - Server returns same GameStateUpdate for viewers but with your_hand empty, your_chips 0.
+// - Viewer can refresh to see updates and leave when done.
 
-// Placeholder types for game updates and table state
-#[derive(Debug)]
-pub struct GameUpdate {
-    pub table_id: u32,
-    pub message: String,
+use crate::api::PokerClient;
+use crate::api::client::ApiError;
+use crate::authentication::AuthSession;
+use poker_core::{GameStateUpdate, GameStatus, GameType};
+use client::read_input;
+
+/// Watch a game (read-only). Register as viewer, then poll and display public state.
+pub async fn watch_game(client: &PokerClient, session: &AuthSession) {
+    println!("\n{}", "=".repeat(50));
+    println!("        WATCH A GAME");
+    println!("{}", "=".repeat(50));
+
+    // List games
+    let list = match client.list_games().await {
+        Ok(l) => l,
+        Err(e) => {
+            println!("Error listing games: {}", e);
+            return;
+        }
+    };
+
+    // Filter to only show games that are waiting or in progress (exclude finished)
+    let watchable_games: Vec<_> = list.games.iter()
+        .filter(|g| g.status == GameStatus::WaitingForPlayers || g.status == GameStatus::InProgress)
+        .collect();
+
+    if watchable_games.is_empty() {
+        println!("No games available to watch (all games are finished).");
+        return;
+    }
+
+    println!("\n--- Available games to watch ---");
+    println!(
+        "{:<4} {:<40} {:<18} {:<10} {:<10}",
+        "#", "Game ID", "Type", "Players", "Status"
+    );
+    println!("{}", "-".repeat(82));
+    for (i, g) in watchable_games.iter().enumerate() {
+        let status = match g.status {
+            GameStatus::WaitingForPlayers => "Waiting",
+            GameStatus::InProgress => "In Progress",
+            GameStatus::Finished => "Finished",
+        };
+        println!(
+            "{:<4} {:<40} {:<18} {}/{:<7} {:<10}",
+            i + 1,
+            g.game_id,
+            g.game_type,
+            g.player_count,
+            g.max_players,
+            status
+        );
+    }
+
+    let choice = read_input("Enter game number (or 0 to cancel): ");
+    let idx: usize = match choice.trim().parse::<usize>() {
+        Ok(n) if n == 0 => {
+            println!("Cancelled.");
+            return;
+        }
+        Ok(n) if n >= 1 && n <= watchable_games.len() => n - 1,
+        _ => {
+            println!("Invalid choice.");
+            return;
+        }
+    };
+
+    let game_id = watchable_games[idx].game_id.clone();
+    println!("\nRegistering as viewer for game {}...", game_id);
+
+    if let Err(e) = client
+        .register_viewer(&session.user_id, &game_id)
+        .await
+    {
+        println!("Error registering as viewer: {}", e);
+        return;
+    }
+    println!("Watching game. (You will see public state only—no player hands.)\n");
+
+    viewer_loop(client, &session.user_id, &game_id).await;
 }
 
-#[derive(Debug)]
-pub struct TableState {
-    pub table_id: u32,
-    pub player_count: u32,
-}
+async fn viewer_loop(
+    client: &PokerClient,
+    viewer_id: &str,
+    game_id: &str,
+) {
+    loop {
+        let state = match client.get_game(game_id, viewer_id).await {
+            Ok(s) => s,
+            Err(e) => {
+                println!("Error fetching game state: {}", e);
+                break;
+            }
+        };
 
-impl TableState {
-    pub fn new() -> Self {
-        TableState {
-            table_id: 0,
-            player_count: 0,
+        display_public_state(&state);
+
+        println!("\n--- Viewer actions ---");
+        println!("1. Refresh");
+        println!("2. Leave");
+
+        let choice = read_input("Choice: ");
+        match choice.trim() {
+            "1" => continue,
+            "2" => {
+                println!("Leaving spectator mode.");
+                break;
+            }
+            _ => println!("Invalid choice."),
         }
     }
 }
 
-pub struct Viewer {
-    username: String,
-    watched_table_id: u32,
-    connected: bool,
-}
+fn display_public_state(state: &GameStateUpdate) {
+    println!("\n{}", "=".repeat(60));
+    println!("  GAME: {} | POT: ${}", state.game_id, state.pot);
+    println!("  Round: {} | Current Bet: ${}", state.betting_round, state.current_bet);
+    println!("{}", "=".repeat(60));
 
-impl Viewer {
-    pub fn new(username: String) -> Self { 
-        Viewer {
-            username,
-            watched_table_id: 0,
-            connected: false,
+    println!("\n--- Players ---");
+    for p in &state.players {
+        let dealer = if p.is_dealer { " (D)" } else { "" };
+        let folded = if p.folded { " [FOLDED]" } else { "" };
+        let action = if state.action_on.as_ref() == Some(&p.username) {
+            " << ACTION"
+        } else {
+            ""
+        };
+        println!(
+            "  {} - Chips: ${} | Bet: ${} | Cards: {}{}{}{}",
+            p.username, p.chips, p.current_bet, p.cards_count, dealer, folded, action
+        );
+    }
+
+    if !state.community_cards.is_empty() {
+        println!("\n--- Community cards ---");
+        for c in &state.community_cards {
+            print!("  {} ", c);
         }
+        println!();
     }
-    
-    // Connect to a specific table
-    pub fn join_table(&mut self, table_id: u32) -> Result<(), String> { 
-        self.watched_table_id = table_id;
-        self.connected = true;
-        Ok(())
-     }
-    
-    // Receive game updates from server (read-only)
-    pub fn receive_update(&mut self, update: GameUpdate) {
-        println!("Received game update: {:?}", update);
-     }
-    
-    // Request current game state
-    pub fn get_table_state(&self) -> Result<TableState, String> {
-        println!("Requested table state for table: {}", self.watched_table_id);
-        Ok(TableState::new())
-     }
-    
-    // Request player statistics
-    pub fn get_statistics(&self, player_id: u32) -> Result<PlayerStatistics, String> {
-        println!("Requested statistics for player: {}", player_id);
-        Ok(PlayerStatistics::new())
+
+    if let Some(ref who) = state.action_on {
+        println!("\n  >>> {} to act <<<", who);
     }
-    
-    // Disconnect from table
-    pub fn leave_table(&mut self) -> Result<(), String> { 
-        self.watched_table_id = 0;
-        self.connected = false;
-        Ok(())
-     }
 }
