@@ -8,7 +8,7 @@ on:
 
 jobs:
   check:
-    name: Check client, core, server, storage
+    name: Check workspace compilation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
