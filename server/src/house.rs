@@ -69,17 +69,17 @@ impl House {
             Game::FiveCardDraw(_)  => { 
                 let game = FiveCardDraw::new()?; 
                 Ok(Game::FiveCardDraw(game))
-            }
+            },
             _ => Err("Failed to create new game of Five Card Draw"), 
             Game::SevenCardStud(_) => {
                 let game = SevenCardStud::new()?; 
                 Ok(Game::SevenCardStud(game))
-            }
+            },
             _ => Err("Failed to create new game of Seven Card Stud"), 
             Game::TexasHoldEm(_) => { 
                 let game = TexasHoldEm::new()?; 
                 Ok(Game::TexasHoldEm(game))
-            }
+            },
             _ => Err("Failed to create new game of Texas Hold 'Em")
         }
     }
@@ -163,19 +163,19 @@ impl House {
 
     //TODO GIVE PLAYER OPTION TO SELECT A GAME FROM HOME SCREEN
 
-    // Locks and searches the live_games data structure in an attempt to locate 
-    // an open game (i.e. one with < 5 active players). If none are found, it 
-    // creates a new game. For fairness, performs an ordered search of the House's 
-    // games, beginning with pending (i.e. 1 player) games and continuing until 
-    // a game with an open seat is located. This prevents player "starvation". 
-    //
-    // Parameters:
-    //      player    - the player to add to a table 
-    //      game_type - the type of game requested by the player  
-    //
-    // Returns: 
-    //      Result<String, 'static String> 
-    //      
+    /// Locks and searches the live_games data structure in an attempt to locate 
+    /// an open game (i.e. one with < 5 active players). If none are found, it 
+    /// creates a new game. For fairness, performs an ordered search of the House's 
+    /// games, beginning with pending (i.e. 1 player) games and continuing until 
+    /// a game with an open seat is located. This prevents player "starvation". 
+    ///
+    /// Parameters:
+    ///     player    - the player to add to a table 
+    ///     game_type - the type of game requested by the player  
+    ///
+    /// Returns: 
+    ///    Result<String, 'static String> 
+    ///     
     pub fn find_player_an_open_table(&mut self, player: &Player, game_type: String) Result<Uuid, &'static String>{
         if &self.pending_games.len() > 0 { 
             let from_one_player  = &House.pending_games; 
@@ -235,35 +235,6 @@ fn open_casino() -> _ {
         .mount("/game/<game_id>", routes![game])
 }
 
-// Helper method. Produces formatted strings for sending to the client. 
-// 
-// Parameters: 
-//     game - the game to convert to a formatted string 
-//
-// Returns: 
-//     a formatted string representation of the input game 
-pub fn game_to_string(active_game: &Game) { 
-    return format!("""
-
-                   GAME: {:>15}
-                   GAMETYPE: {:>15}
-                   DEALER: {:>15}
-                   POT: {:>15}
-                   ROUND: {:>15}
-                   ACTION ON: {:>15}
-                   # PLAYERS: {:>15}
-                   {:=>15}
-
-                  """, 
-                  *active_game.game_id,
-                  *active_game.game_type.to_string(), 
-                  String::from("COMPUTER"), 
-                  *active_game.pot.to_string(), 
-                  *active_game.betting_round.to_string(), 
-                  *active_game.action_on.username(),   //returns empty string if action_on is none
-                  *active_game.table.get_player_count().to_string()
-                  )
-}
 
 /// Index or home page. Opens a WebSocket channel to a client, stores the 
 /// client's connection data in server state, displays a view of all active 
@@ -278,23 +249,6 @@ pub fn game_to_string(active_game: &Game) {
 ///      
 #[get("/open_floor")] 
 async fn open_floor(ws: ws::WebSocket, gametype: String, username: String, state: &State<House>) -> ws::Channel<'static> {
-    let mut display_pending_games = String::from("======== WAITING TO PLAY ========");
-    let house = *state.clone(); 
-    for pending_game in &house.pending_games {
-        display_pending_games += game_to_string(&pending_game); 
-    }
-
-    let mut display_active_games =  String::from("========  GAMES IN PLAY ========="); 
-    for active_game in &house.twoplayer_games {         
-        display_active_games += game_to_string(&active_game);
-    }
-    for active_game in &house.threeplayer_games { 
-        display_active_games += game_to_string(&active_game); 
-    }
-    for active_game in &house.fourplayer_games { 
-        display_active_games += game_to_string(&active_game); 
-    }
-    display_all_games = display_pending_games + display_active_games;
     
     ws.channel(move |mut stream| { 
         Box::pin(async move { 
@@ -306,7 +260,7 @@ async fn open_floor(ws: ws::WebSocket, gametype: String, username: String, state
                 player.id = id;
                 player.username = username; 
 
-                stream.send(display_all_games.into())
+                stream.send()
                       .await 
                       .unwrap(); 
 
@@ -332,10 +286,30 @@ async fn open_floor(ws: ws::WebSocket, gametype: String, username: String, state
 /// Parameters: 
 ///     game_id - str,  the id specifying the game to connect to 
 ///     play    - bool, true if client player, false if viewer
-#[post("/game/<game_id>", format = "string")] 
-async fn game(game_id: &str, play: bool) -> String {
+#[post("/games", format = "string")] 
+async fn games() -> Json {
    format!("") 
 }
+
+///
+///
+///
+///
+///
+///
+#[post("/games")] 
+async fn new_game() { 
+}
+
+///
+///
+///
+///
+///
+///
+#[post("/players/<player_id>/stats", format = "string")] 
+async fn stats(player_id: &str) -> Json { 
+} 
 
 /// 
 ///
@@ -343,21 +317,34 @@ async fn game(game_id: &str, play: bool) -> String {
 ///
 ///
 ///
-
-/*
-#[get("/")]
-fn login() {
+#[post("/games/<game_id>/viewer", format = "string")] 
+async fn viewers(game_id: &str) { 
 }
 
-#[get("/")] 
-fn create_account() {
+///
+///
+///
+///
+///
+///
+#[post("/rules")] 
+pub async fn rules() { 
 }
 
-#[get("/echo/str")] 
-fn join_game() {
+///
+///
+///
+///
+///
+///
+#[post("/games/<game_id>/action")]
+async fn action(game_id: &str) { 
 }
 
-#[get("/buychips")] 
-fn deposit_chips(){
-}
-*/ 
+///
+///
+///
+///
+///
+///
+#[post("/")]
