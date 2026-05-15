@@ -1,13 +1,288 @@
-//  Poker Game Variants
-//
-// This module contains the game variant structures for the poker server.
-
 use crate::betting::{BettingRound, BettingState};
 use crate::deck::Deck;
-use crate::table::Table;
 use crate::player::Player;
+use crate::table::Table;
 use strum_macros::Display;
 use uuid::Uuid;
+
+#[derive(Debug, Clone)]
+pub struct SharedGameState {
+    pub deck: Deck,
+    pub table: Table,
+    pub pot: u32,
+
+    // Core Game
+    pub dealer_idx: usize,
+    pub action_on: Option<Uuid>,
+
+    // Shared Betting Data
+    pub betting_state: BettingState,
+}
+
+impl SharedGameState {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            deck: Deck::standard(),
+            table: Table::with_max_players(capacity),
+            pot: 0,
+            dealer_idx: 0,
+            action_on: None,
+            betting_state: BettingState::new(),
+        }
+    }
+
+    pub fn get_player_index(&self, player_id: Uuid) -> Option<usize> {
+        self.table.players.iter().position(|p| p.id == player_id)
+    }
+
+    pub fn get_active_player_mut(&mut self) -> Option<&mut Player> {
+        match self.action_on {
+            Some(uid) => self.table.get_player_mut(uid),
+            None => None,
+        }
+    }
+
+    pub fn count_active_players(&self) -> usize {
+        self.table.players.iter().filter(|p| !p.is_folded).count()
+    }
+
+    fn next_player_index(&self, uid: Uuid) -> usize {
+        let i = self
+            .get_player_index(uid)
+            .expect("action_on refers to non-existent player");
+
+        return i + 1;
+    }
+
+    /// Rotates the action to the next eligible player.
+    /// Usage Notes -
+    /// include_all_in (bool flag) - If true, players with 0 chips (All-In) get a turn
+    ///   Use false for Betting Rounds
+    ///   Use true for Draw/Showdown Rounds
+    pub fn advance_action(&mut self, include_all_in: bool) -> bool {
+        if self.table.players.is_empty() {
+            return false;
+        }
+
+        let start_index = match self.action_on {
+            Some(uid) => self.next_player_index(uid),
+            None => self.dealer_idx + 1,
+        };
+
+        let count = self.table.players.len();
+
+        for i in 0..count {
+            let idx = (start_index + i) % count;
+            let player = &self.table.players[idx];
+
+            if player.is_folded {
+                continue;
+            }
+
+            if include_all_in || player.chips > 0 {
+                self.action_on = Some(player.id);
+                return true;
+            }
+        }
+
+        self.action_on = None;
+        return false;
+    }
+
+    pub fn post_bet(&mut self, player_id: Uuid, amount: u32) -> Result<(), &'static str> {
+        // Lookup player
+        let player = self
+            .table
+            .get_player_mut(player_id)
+            .ok_or("player_not_found")?;
+
+        if amount > player.chips {
+            return Err("insufficient_funds");
+        }
+
+        player.chips -= amount; // Wallet decreases
+        player.current_bet += amount; // Ledger updates
+        self.pot += amount; // Pot grows
+
+        Ok(())
+    }
+
+    pub fn reset_current_bets(&mut self) {
+        for player in &mut self.table.players {
+            player.current_bet = 0;
+        }
+        self.betting_state.reset_round();
+    }
+
+    /// Generic handler for standard betting rounds (PreDraw, PostDraw) [Potentially useful later for other variants too]
+    /// Returns Ok(true) if the round is over
+    /// Returns Ok(false) if the round continues
+    pub fn process_betting_action(
+        &mut self,
+        player_id: Uuid,
+        action: crate::protocol::GameAction,
+    ) -> Result<bool, String> {
+        if self.action_on != Some(player_id) {
+            return Err("not_your_turn".to_string());
+        }
+
+        let player_idx = self.get_player_index(player_id).unwrap();
+        let current_contribution = self.table.players[player_idx].current_bet;
+        let to_call = self.betting_state.to_call;
+
+        match action {
+            crate::protocol::GameAction::Fold => {
+                let player = self.table.get_player_mut(player_id).unwrap();
+                player.is_folded = true;
+            }
+
+            crate::protocol::GameAction::Check => {
+                if current_contribution < to_call {
+                    return Err("cannot_check_must_call".to_string());
+                }
+            }
+
+            crate::protocol::GameAction::Call => {
+                let needed = to_call.saturating_sub(current_contribution);
+                self.post_bet(player_id, needed)?;
+            }
+
+            crate::protocol::GameAction::Bet { amount } => {
+                if to_call > 0 {
+                    return Err("cannot_bet_must_raise".to_string());
+                }
+                if amount < self.betting_state.min_raise {
+                    return Err("bet_too_small".to_string());
+                }
+
+                // Bet 10 means Raise To 10 (from 0)
+                self.post_bet(player_id, amount)?;
+
+                self.betting_state.to_call = amount;
+                self.betting_state.last_aggressor = Some(player_id);
+            }
+
+            crate::protocol::GameAction::Raise { amount } => {
+                if to_call == 0 {
+                    return Err("cannot_raise_must_bet".to_string());
+                }
+                if amount < to_call + self.betting_state.min_raise {
+                    return Err("raise_too_small".to_string());
+                }
+
+                // "Raise To 50", in for 10, pay 40 more
+                let delta = amount.saturating_sub(current_contribution);
+                self.post_bet(player_id, delta)?;
+
+                self.betting_state.to_call = amount;
+                self.betting_state.raises_used += 1;
+                self.betting_state.last_aggressor = Some(player_id);
+            }
+
+            _ => return Err("invalid_action_for_betting_phase".to_string()),
+        }
+
+        let was_aggressor = self.betting_state.last_aggressor;
+
+        // skip All-Ins
+        if !self.advance_action(false) {
+            return Ok(true);
+        }
+
+        if let Some(aggressor) = was_aggressor {
+            // Looped back to the raiser -> Round Over
+            if self.action_on == Some(aggressor) {
+                return Ok(true);
+            }
+        } else {
+            // Check-around complete
+            // Logic: back at Dealer+1 and pot is flat
+            let start_idx = (self.dealer_idx + 1) % self.table.players.len();
+            let current_idx = self.get_player_index(self.action_on.unwrap()).unwrap();
+
+            if current_idx == start_idx && self.betting_state.to_call == 0 {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Evaluates all hands, splits the pot, and pays the winner(s).
+    /// Returns a list of (PlayerId, AmountWon) for notification.
+    pub fn resolve_showdown(&mut self) -> Vec<(Uuid, u32)> {
+        let mut candidates: Vec<(Uuid, crate::hand::HandRank)> = self
+            .table
+            .players
+            .iter()
+            .filter(|p| !p.is_folded)
+            .map(|p| (p.id, p.hand.evaluate())) // evaluate() from hand.rs
+            .collect();
+
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        // sort descending (Best hand first)
+        candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let best_rank = &candidates[0].1;
+
+        // identify winners
+        let winners: Vec<Uuid> = candidates
+            .iter()
+            .take_while(|(_, rank)| rank == best_rank)
+            .map(|(id, _)| *id)
+            .collect();
+
+        // Split Pot TODO MIGHT NEED REWORKING THIS IS A SIMPLE IMPLEMENTATION
+        let count = winners.len() as u32;
+        let share = self.pot / count;
+        let mut remainder = self.pot % count;
+
+        let mut results = Vec::new();
+
+        for winner_id in winners {
+            let mut payout = share;
+            if remainder > 0 {
+                payout += 1;
+                remainder -= 1;
+            }
+
+            if let Some(player) = self.table.get_player_mut(winner_id) {
+                player.chips += payout;
+                results.push((winner_id, payout));
+            }
+        }
+
+        self.pot = 0;
+        results
+    }
+
+    /// Cleans up state to prepare for the next hand
+    pub fn reset_for_new_hand(&mut self) {
+        // Reset Deck
+        self.deck = Deck::standard();
+        self.deck.shuffle();
+
+        // Rotate Dealer
+        let count = self.table.players.len();
+        if count > 0 {
+            self.dealer_idx = (self.dealer_idx + 1) % count;
+        }
+
+        // Reset Players
+        for player in &mut self.table.players {
+            player.hand.clear();
+            player.is_folded = false;
+            player.current_bet = 0;
+        }
+
+        // Reset State
+        self.betting_state.reset_round();
+        self.action_on = None;
+    }
+}
 
 // ============================================================================
 // Game Enum
@@ -34,456 +309,122 @@ pub enum Game {
 #[derive(Debug, Clone)]
 pub struct FiveCardDraw {
     pub game_id: Uuid,
-    pub deck: Deck,
-    pub table: Table,
-    pub pot: u32,
+    pub core: SharedGameState,
     pub betting_round: BettingRound,
-    pub betting_state: BettingState,
-    pub dealer_position: usize,
-    pub action_on: Option<Uuid>, // active player ID
 }
 
 impl FiveCardDraw {
     pub fn new() -> Self {
         Self {
             game_id: Uuid::new_v4(),
-            deck: Deck::standard(),
-            table: Table::new(),
-            pot: 0,
+            core: SharedGameState::new(5),
             betting_round: BettingRound::PreDeal,
-            betting_state: BettingState::new(),
-            dealer_position: 0,
-            action_on: None,
         }
     }
 
-    /// Round - Step 1: Shuffle the deck
-    pub fn shuffle(&mut self) {
-        self.deck = Deck::standard();
-        self.deck.shuffle();
-    }
-
-    /// Round - Step 2: Each player is dealt five private cards which form their hand.
-    pub fn deal(&mut self) -> Result<(), String> {
-        // Shuffle first
-        self.shuffle();
-        
-        // Reset game state
-        self.pot = 0;
-        self.betting_round = BettingRound::PreDraw;
-        self.betting_state = BettingState::new();
-
-        // Clear all hands
-        for player in &mut self.table.players {
-            player.hand.clear();
-            player.is_folded = false;
-            player.current_bet = 0;
+    pub fn predraw_betting(
+        &mut self,
+        player_id: Uuid,
+        action: crate::protocol::GameAction,
+    ) -> Result<(), String> {
+        if self.betting_round != BettingRound::PreDraw {
+            return Err("wrong_phase".to_string());
         }
 
-        // Deal 5 cards to each player
-        for deal in 1..=5 {
-            for player in &mut self.table.players {
-                // On the very first deal, every player's hand should be empty
-                if !player.hand.is_empty() && deal == 1 {
-                    return Err(format!(
-                        "No cards have been dealt, but {} somehow has {} card(s) in hand. This should be impossible.",
-                        player.id,
-                        player.hand.len()
-                    ));
-                }
-                let cards = self.deck.deal(1);
-                if let Some(_card) = cards.first() {
-                    // Store card index (simplified representation)
-                    player.hand.push(player.hand.len() as u8);
-                }
-            }
-        }
+        let round_over = self.core.process_betting_action(player_id, action)?;
 
-        // Set action on player after dealer
-        if !self.table.players.is_empty() {
-            let action_idx = (self.dealer_position + 1) % self.table.players.len();
-            self.action_on = Some(self.table.players[action_idx].id);
+        if round_over {
+            self.transition_to_draw_phase();
         }
 
         Ok(())
     }
 
-    /// Round - Step 3: Pre-draw betting round.
-    /// This is the first betting round. It begins with the player to the dealer's left,
-    /// which for simplicity is defined as the Player located at index 0 in the Table's
-    /// Player Vec.
-    pub fn predraw_betting(&mut self) -> Result<(), String> {
-        self.betting_round = BettingRound::PreDraw;
-        // Betting logic would go here
-        // For now, just advance to draw phase
-        Ok(())
-    }
-
-    /// Round - Step 4: Draw phase where players can discard and draw new cards.
-    pub fn draw(&mut self, player_id: Uuid, discard_indices: &[usize]) -> Result<(), String> {
-        let player = self.table.players
-            .iter_mut()
-            .find(|p| p.id == player_id)
-            .ok_or("Player not found")?;
-
-        if discard_indices.len() > 3 {
-            return Err("Can only discard up to 3 cards".to_string());
+    /// Same logic as predraw, just different phase check and transition
+    pub fn postdraw_betting(
+        &mut self,
+        player_id: Uuid,
+        action: crate::protocol::GameAction,
+    ) -> Result<(), String> {
+        if self.betting_round != BettingRound::PostDraw {
+            return Err("wrong_phase".to_string());
         }
 
-        // Remove discarded cards (in reverse order to maintain indices)
-        let mut sorted_indices = discard_indices.to_vec();
-        sorted_indices.sort_by(|a, b| b.cmp(a));
-        
-        for &idx in &sorted_indices {
-            if idx >= player.hand.len() {
-                return Err("Invalid card index".to_string());
-            }
-            player.hand.remove(idx);
-        }
+        let round_over = self.core.process_betting_action(player_id, action)?;
 
-        // Deal new cards
-        for _ in 0..discard_indices.len() {
-            let cards = self.deck.deal(1);
-            if cards.first().is_some() {
-                player.hand.push(player.hand.len() as u8);
-            }
+        if round_over {
+            self.transition_to_showdown();
         }
 
         Ok(())
     }
 
-    /// Round - Step 5: Post-draw betting round.
-    pub fn postdraw_betting(&mut self) -> Result<(), String> {
+    fn transition_to_draw_phase(&mut self) {
+        self.core.reset_current_bets();
+        self.betting_round = BettingRound::Drawing;
+        self.core.action_on = None;
+
+        // pass true to include All-In players for card swap
+        if !self.core.advance_action(true) {
+            self.transition_to_post_draw();
+        }
+    }
+
+    /// called when the last player has finished drawing.
+    fn transition_to_post_draw(&mut self) {
+        self.core.reset_current_bets();
         self.betting_round = BettingRound::PostDraw;
-        // Betting logic would go here
+        self.core.action_on = None;
+
+        // pass false to SKIP All-In players
+        if !self.core.advance_action(false) {
+            self.transition_to_showdown();
+        }
+    }
+
+    fn transition_to_showdown(&mut self) {
+        self.core.reset_current_bets();
+        // self.betting_round = BettingRound::Showdown; 
+        //(TODO I am assuming we dont need to actually pause the game for it now in CLI, 
+        //will need to account for this in an actual UI)
+
+        let _results = self.core.resolve_showdown();
+
+        self.core.reset_for_new_hand();
+
+        // loop back to PreDeal waiting for next start
+        self.betting_round = BettingRound::PreDeal;
+    }
+
+    pub fn handle_draw_action(
+        &mut self,
+        player_id: Uuid,
+        discard_indices: Vec<usize>,
+    ) -> Result<(), String> {
+        if self.core.action_on != Some(player_id) {
+            return Err("not_your_turn".to_string());
+        }
+        if self.betting_round != BettingRound::Drawing {
+            return Err("wrong_phase_expecting_drawing".to_string());
+        }
+
+        if discard_indices.len() > 5 {
+            return Err("too_many_discards".to_string());
+        }
+
+        let player = self.core.table.get_player_mut(player_id).unwrap();
+        player.draw(&mut self.core.deck, &discard_indices)?;
+
+        // pass true because the next person might be All-In
+        if !self.core.advance_action(true) {
+            self.transition_to_post_draw();
+        }
+
         Ok(())
     }
-
-    /// Round - Step 6: Showdown - compare hands and determine winner.
-    pub fn showdown(&self) -> Option<Uuid> {
-        // Find active (non-folded) players
-        let active_players: Vec<&Player> = self.table.players
-            .iter()
-            .filter(|p| !p.is_folded)
-            .collect();
-
-        if active_players.len() == 1 {
-            return Some(active_players[0].id);
-        }
-
-        // TODO: Implement hand comparison logic
-        // For now, return the first active player
-        active_players.first().map(|p| p.id)
-    }
-
-    /// Round - Step 7: Payout - distribute pot to winner(s).
-    pub fn payout(&mut self, winner_id: Uuid) -> Result<u32, String> {
-        let pot = self.pot;
-        self.pot = 0;
-
-        let winner = self.table.players
-            .iter_mut()
-            .find(|p| p.id == winner_id)
-            .ok_or("Winner not found")?;
-
-        winner.chips += pot;
-        Ok(pot)
-    }
-
-    /// Reset the game for a new hand.
-    pub fn reset(&mut self) {
-        self.pot = 0;
-        self.betting_round = BettingRound::PreDeal;
-        self.betting_state = BettingState::new();
-        self.action_on = None;
-
-        for player in &mut self.table.players {
-            player.hand.clear();
-            player.is_folded = false;
-            player.current_bet = 0;
-        }
-
-        // Rotate dealer
-        if !self.table.players.is_empty() {
-            self.dealer_position = (self.dealer_position + 1) % self.table.players.len();
-        }
-    }
-
-    /// Get the username of the player whose turn it is.
-    pub fn get_action_on_username(&self) -> String {
-        if let Some(player_id) = self.action_on {
-            self.table.players
-                .iter()
-                .find(|p| p.id == player_id)
-                .map(|p| p.username.clone())
-                .unwrap_or_default()
-        } else {
-            String::new()
-        }
-    }
 }
-
-impl Default for FiveCardDraw {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ============================================================================
-// Seven Card Stud
-// ============================================================================
 
 #[derive(Debug, Clone)]
-pub struct SevenCardStud {
-    pub game_id: Uuid,
-    pub deck: Deck,
-    pub table: Table,
-    pub pot: u32,
-    pub betting_round: BettingRound,
-    pub betting_state: BettingState,
-    pub dealer_position: usize,
-    pub action_on: Option<Uuid>,
-}
-
-impl SevenCardStud {
-    pub fn new() -> Self {
-        Self {
-            game_id: Uuid::new_v4(),
-            deck: Deck::standard(),
-            table: Table::new(),
-            pot: 0,
-            betting_round: BettingRound::PreDeal,
-            betting_state: BettingState::new(),
-            dealer_position: 0,
-            action_on: None,
-        }
-    }
-
-    pub fn shuffle(&mut self) {
-        self.deck = Deck::standard();
-        self.deck.shuffle();
-    }
-
-    /// Deal initial cards: 2 down, 1 up to each player.
-    pub fn deal(&mut self) -> Result<(), String> {
-        self.shuffle();
-        self.pot = 0;
-        self.betting_round = BettingRound::ThirdStreet;
-        self.betting_state = BettingState::new();
-
-        for player in &mut self.table.players {
-            player.hand.clear();
-            player.is_folded = false;
-            player.current_bet = 0;
-        }
-
-        // Deal 3 cards to each player (2 down, 1 up)
-        for _ in 0..3 {
-            for player in &mut self.table.players {
-                let cards = self.deck.deal(1);
-                if cards.first().is_some() {
-                    player.hand.push(player.hand.len() as u8);
-                }
-            }
-        }
-
-        // Action starts with player showing lowest card (simplified: first player)
-        if !self.table.players.is_empty() {
-            self.action_on = Some(self.table.players[0].id);
-        }
-
-        Ok(())
-    }
-
-    pub fn reset(&mut self) {
-        self.pot = 0;
-        self.betting_round = BettingRound::PreDeal;
-        self.betting_state = BettingState::new();
-        self.action_on = None;
-
-        for player in &mut self.table.players {
-            player.hand.clear();
-            player.is_folded = false;
-            player.current_bet = 0;
-        }
-    }
-
-    pub fn get_action_on_username(&self) -> String {
-        if let Some(player_id) = self.action_on {
-            self.table.players
-                .iter()
-                .find(|p| p.id == player_id)
-                .map(|p| p.username.clone())
-                .unwrap_or_default()
-        } else {
-            String::new()
-        }
-    }
-}
-
-impl Default for SevenCardStud {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ============================================================================
-// Texas Hold'Em
-// ============================================================================
-
+pub struct SevenCardStud;
 #[derive(Debug, Clone)]
-pub struct TexasHoldEm {
-    pub game_id: Uuid,
-    pub deck: Deck,
-    pub table: Table,
-    pub pot: u32,
-    pub betting_round: BettingRound,
-    pub betting_state: BettingState,
-    pub dealer_position: usize,
-    pub action_on: Option<Uuid>,
-    pub community_cards: Vec<u8>, // The 5 community cards
-}
-
-impl TexasHoldEm {
-    pub fn new() -> Self {
-        Self {
-            game_id: Uuid::new_v4(),
-            deck: Deck::standard(),
-            table: Table::new(),
-            pot: 0,
-            betting_round: BettingRound::PreDeal,
-            betting_state: BettingState::new(),
-            dealer_position: 0,
-            action_on: None,
-            community_cards: Vec::new(),
-        }
-    }
-
-    pub fn shuffle(&mut self) {
-        self.deck = Deck::standard();
-        self.deck.shuffle();
-    }
-
-    /// Deal 2 hole cards to each player.
-    pub fn deal(&mut self) -> Result<(), String> {
-        self.shuffle();
-        self.pot = 0;
-        self.betting_round = BettingRound::PreFlop;
-        self.betting_state = BettingState::new();
-        self.community_cards.clear();
-
-        for player in &mut self.table.players {
-            player.hand.clear();
-            player.is_folded = false;
-            player.current_bet = 0;
-        }
-
-        // Deal 2 hole cards to each player
-        for _ in 0..2 {
-            for player in &mut self.table.players {
-                let cards = self.deck.deal(1);
-                if cards.first().is_some() {
-                    player.hand.push(player.hand.len() as u8);
-                }
-            }
-        }
-
-        // Action starts with player after big blind (dealer + 3)
-        if !self.table.players.is_empty() {
-            let action_idx = (self.dealer_position + 3) % self.table.players.len();
-            self.action_on = Some(self.table.players[action_idx].id);
-        }
-
-        Ok(())
-    }
-
-    /// Deal the flop (3 community cards).
-    pub fn deal_flop(&mut self) -> Result<(), String> {
-        if self.betting_round != BettingRound::PreFlop {
-            return Err("Not in pre-flop phase".to_string());
-        }
-
-        // Burn one card, deal 3
-        self.deck.deal(1); // burn
-        for _ in 0..3 {
-            let cards = self.deck.deal(1);
-            if cards.first().is_some() {
-                self.community_cards.push(self.community_cards.len() as u8);
-            }
-        }
-
-        self.betting_round = BettingRound::Flop;
-        Ok(())
-    }
-
-    /// Deal the turn (4th community card).
-    pub fn deal_turn(&mut self) -> Result<(), String> {
-        if self.betting_round != BettingRound::Flop {
-            return Err("Not in flop phase".to_string());
-        }
-
-        // Burn one, deal one
-        self.deck.deal(1);
-        let cards = self.deck.deal(1);
-        if cards.first().is_some() {
-            self.community_cards.push(self.community_cards.len() as u8);
-        }
-
-        self.betting_round = BettingRound::Turn;
-        Ok(())
-    }
-
-    /// Deal the river (5th community card).
-    pub fn deal_river(&mut self) -> Result<(), String> {
-        if self.betting_round != BettingRound::Turn {
-            return Err("Not in turn phase".to_string());
-        }
-
-        // Burn one, deal one
-        self.deck.deal(1);
-        let cards = self.deck.deal(1);
-        if cards.first().is_some() {
-            self.community_cards.push(self.community_cards.len() as u8);
-        }
-
-        self.betting_round = BettingRound::River;
-        Ok(())
-    }
-
-    pub fn reset(&mut self) {
-        self.pot = 0;
-        self.betting_round = BettingRound::PreDeal;
-        self.betting_state = BettingState::new();
-        self.action_on = None;
-        self.community_cards.clear();
-
-        for player in &mut self.table.players {
-            player.hand.clear();
-            player.is_folded = false;
-            player.current_bet = 0;
-        }
-
-        // Rotate dealer
-        if !self.table.players.is_empty() {
-            self.dealer_position = (self.dealer_position + 1) % self.table.players.len();
-        }
-    }
-
-    pub fn get_action_on_username(&self) -> String {
-        if let Some(player_id) = self.action_on {
-            self.table.players
-                .iter()
-                .find(|p| p.id == player_id)
-                .map(|p| p.username.clone())
-                .unwrap_or_default()
-        } else {
-            String::new()
-        }
-    }
-}
-
-impl Default for TexasHoldEm {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+pub struct TexasHoldEm;

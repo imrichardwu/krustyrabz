@@ -38,7 +38,6 @@ impl PartialOrd for HandRank {
         Some(self.cmp(other))
     }
 }
-
 pub struct Hand {
     // Increased to 7 to support SevenCardStud and Hold'em (best 5 of 7)
     // For 5-Card Draw, we just use the first 5 slots.
@@ -263,6 +262,8 @@ impl Hand {
             _ => panic!("Invalid rank value: {}", v),
         }
     }
+
+    pub fn remove_at(&mut self, index: usize) -> Card { self.cards.remove(index) }
 
 }
 

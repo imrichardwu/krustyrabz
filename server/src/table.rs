@@ -18,17 +18,14 @@ pub struct Table {
 }
 
 impl Table {
+    // Defaults to 5 for standard Draw games if not specified
     pub fn new() -> Self {
-        Self {
-            players: Vec::new(),
-            viewers: Vec::new(),
-            max_players: 5,
-        }
+        Self::with_max_players(5)
     }
 
     pub fn with_max_players(max_players: usize) -> Self {
         Self {
-            players: Vec::new(),
+            players: Vec::with_capacity(max_players),
             viewers: Vec::new(),
             max_players,
         }

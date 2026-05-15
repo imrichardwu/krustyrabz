@@ -2,119 +2,92 @@
 //
 // This module handles betting rounds and state for all poker variants.
 
-use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
+use strum_macros::Display;
 
 /// Stores round-types for all 3 poker variants.
 /// PreDeal is shared across all 3 variants, it specifies that the game has not yet started.
-#[repr(u8)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy, Display)]
 pub enum BettingRound {
+    #[strum(serialize = "predeal")]
     PreDeal,
     // Five Card Draw rounds
+    #[strum(serialize = "predraw")]
     PreDraw,
+    #[strum(serialize = "postdraw")]
     PostDraw,
+    #[strum(serialize = "drawing")]
+    Drawing,
     // Texas Hold'Em rounds
+    #[strum(serialize = "preflop")]
     PreFlop,
+    #[strum(serialize = "flop")]
     Flop,
+    #[strum(serialize = "turn")]
     Turn,
+    #[strum(serialize = "river")]
     River,
     // Seven Card Stud rounds
+    #[strum(serialize = "third_street")]
     ThirdStreet,
+    #[strum(serialize = "fourth_street")]
     FourthStreet,
+    #[strum(serialize = "fifth_street")]
     FifthStreet,
+    #[strum(serialize = "sixth_street")]
     SixthStreet,
+    #[strum(serialize = "seventh_street")]
     SeventhStreet,
 }
 
-impl std::fmt::Display for BettingRound {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BettingRound::PreDeal => write!(f, "predeal"),
-            BettingRound::PreDraw => write!(f, "predraw"),
-            BettingRound::PostDraw => write!(f, "postdraw"),
-            BettingRound::PreFlop => write!(f, "preflop"),
-            BettingRound::Flop => write!(f, "flop"),
-            BettingRound::Turn => write!(f, "turn"),
-            BettingRound::River => write!(f, "river"),
-            BettingRound::ThirdStreet => write!(f, "third_street"),
-            BettingRound::FourthStreet => write!(f, "fourth_street"),
-            BettingRound::FifthStreet => write!(f, "fifth_street"),
-            BettingRound::SixthStreet => write!(f, "sixth_street"),
-            BettingRound::SeventhStreet => write!(f, "seventh_street"),
-        }
-    }
+/// Represents an action taken by a player.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BetAction {
+    Check,
+    Fold,
+    Call,
+   //Raise To (the total amount the player wishes to reach)
+    RaiseTo(u32), 
+    AllIn,
 }
 
-/// Tracks the current betting state within a round.
+/// Tracks the constraints and metadata of the current betting round.
 #[derive(Debug, Clone)]
 pub struct BettingState {
-    pub pot: u32,
     pub to_call: u32,
-    pub min_bet: u32,
-    pub max_bet: u32,
+    pub min_raise: u32,
     pub raises_used: u8,
     pub max_raises: u8,
-    pub contributions: HashMap<Uuid, u32>,
-    pub folded: HashSet<Uuid>,
-    pub betting_round: BettingRound,
+    
+    // Flow Control
+    pub last_aggressor: Option<Uuid>, 
 }
 
 impl BettingState {
     pub fn new() -> Self {
         Self {
-            pot: 0,
             to_call: 0,
-            min_bet: 10,
-            max_bet: 100,
+            min_raise: 10,
             raises_used: 0,
             max_raises: 3,
-            contributions: HashMap::new(),
-            folded: HashSet::new(),
-            betting_round: BettingRound::PreDeal,
+            last_aggressor: None,
         }
     }
 
-    pub fn with_limits(min_bet: u32, max_bet: u32, max_raises: u8) -> Self {
+    pub fn with_limits(min_raise: u32, max_raises: u8) -> Self {
         Self {
-            pot: 0,
             to_call: 0,
-            min_bet,
-            max_bet,
+            min_raise,
             raises_used: 0,
             max_raises,
-            contributions: HashMap::new(),
-            folded: HashSet::new(),
-            betting_round: BettingRound::PreDeal,
+            last_aggressor: None,
         }
     }
 
     pub fn reset_round(&mut self) {
         self.to_call = 0;
         self.raises_used = 0;
-        self.contributions.clear();
-    }
-
-    pub fn add_to_pot(&mut self, player_id: Uuid, amount: u32) {
-        self.pot += amount;
-        *self.contributions.entry(player_id).or_insert(0) += amount;
-    }
-
-    pub fn fold_player(&mut self, player_id: Uuid) {
-        self.folded.insert(player_id);
-    }
-
-    pub fn is_folded(&self, player_id: &Uuid) -> bool {
-        self.folded.contains(player_id)
-    }
-
-    pub fn get_contribution(&self, player_id: &Uuid) -> u32 {
-        *self.contributions.get(player_id).unwrap_or(&0)
-    }
-
-    pub fn advance_round(&mut self, next_round: BettingRound) {
-        self.betting_round = next_round;
-        self.reset_round();
+        self.last_aggressor = None;
     }
 }
 

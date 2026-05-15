@@ -1,43 +1,58 @@
-use crate::card::Card;
-use crate::betting::{BetAction, BettingOutcome};
+//use crate::card::Card;
 use crate::hand::DeckTrait;
+use crate::hand::Hand; // Using my implementation of Hand in place of a vector
 use uuid::Uuid;
 
 pub struct Player {
     pub id: Uuid,
-    pub hand: Vec<Card>,
+    pub username: String,
+    pub hand: Hand,
     pub chips: u32,
-    pub game_id: u32
+    pub current_bet: u32, // Tracked for betting logic
+    pub is_folded: bool,  // Tracked for game logic
+    pub game_id: Uuid,
 }
 
 impl Player {
-    pub fn new(chips: u32, id: Uuid, game_id: u32) -> Self {
+    pub fn new(username: String, chips: u32, game_id: Uuid) -> Self {
         Self {
-            id,
-            hand: Vec::new(),
-            chips, 
-            game_id
+            id: Uuid::new_v4(),
+            username,
+            hand: Hand::new(),
+            chips,
+            current_bet: 0,
+            is_folded: false,
+            game_id,
         }
     }
 
+    // draw function that works with ArrayVec
     pub fn draw(&mut self, deck: &mut dyn DeckTrait, discard_indices: &[usize]) -> Result<(), String> {
-        let mut sorted_indices = discard_indices.to_vec();
-        sorted_indices.sort_by(|a, b| b.cmp(a));
 
-        for &i in &sorted_indices {
-            if i >= self.hand.len() {
+        for &idx in discard_indices {
+            if idx >= self.hand.len() {
                 return Err("Invalid card index".to_string());
             }
-            self.hand.remove(i);
         }
 
-        let new_cards = deck.deal(discard_indices.len());
-        self.hand.extend(new_cards);
+        let mut sorted_indices = discard_indices.to_vec();
+        sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
+        sorted_indices.dedup();
+
+        
+        for &i in &sorted_indices {
+             self.hand.remove_at(i); 
+        }
+
+        let new_cards = deck.deal(sorted_indices.len());
+        for card in new_cards {
+            self.hand.add(card);
+        }
 
         Ok(())
     }
 
-   pub fn get_action(&self) -> () {
-    todo!()
-   }
+    pub fn get_action(&self) -> () {
+        todo!()
+    }
 }
