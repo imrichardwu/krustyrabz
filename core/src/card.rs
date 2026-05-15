@@ -61,3 +61,41 @@ impl Card {
         format!("{}{}", self.rank, self.suit)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn card_construct_and_to_string() {
+        let c = Card::construct(Rank::Ace, Suit::Spades, CardType::Private);
+        assert_eq!(c.rank, Rank::Ace);
+        assert_eq!(c.suit, Suit::Spades);
+        assert_eq!(c.to_string(), "A♠");
+    }
+
+    #[test]
+    fn rank_value() {
+        assert_eq!(Rank::Two.value(), 2);
+        assert_eq!(Rank::Ten.value(), 10);
+        assert_eq!(Rank::Ace.value(), 14);
+    }
+
+    #[test]
+    fn rank_ordering() {
+        assert!(Rank::Ace > Rank::King);
+        assert!(Rank::Two < Rank::Three);
+    }
+
+    #[test]
+    fn suit_equality() {
+        assert_eq!(Suit::Hearts, Suit::Hearts);
+        assert_ne!(Suit::Clubs, Suit::Diamonds);
+    }
+
+    #[test]
+    fn card_type_roundtrip() {
+        let c = Card::construct(Rank::King, Suit::Hearts, CardType::Community);
+        assert_eq!(c.card_type, CardType::Community);
+    }
+}

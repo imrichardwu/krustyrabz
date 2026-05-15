@@ -266,6 +266,117 @@ impl Hand {
 
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::card::CardType;
+
+    fn card(r: Rank, s: Suit) -> Card {
+        Card::construct(r, s, CardType::Private)
+    }
+
+    #[test]
+    fn hand_new_empty() {
+        let h = Hand::new();
+        assert!(h.is_empty());
+        assert_eq!(h.len(), 0);
+    }
+
+    #[test]
+    fn hand_add_and_len() {
+        let mut h = Hand::new();
+        h.add(card(Rank::Ace, Suit::Spades));
+        h.add(card(Rank::King, Suit::Spades));
+        assert_eq!(h.len(), 2);
+        assert!(!h.is_empty());
+        assert_eq!(h.cards().len(), 2);
+    }
+
+    #[test]
+    fn hand_clear() {
+        let mut h = Hand::new();
+        h.add(card(Rank::Two, Suit::Hearts));
+        h.clear();
+        assert!(h.is_empty());
+        assert_eq!(h.len(), 0);
+    }
+
+    #[test]
+    fn evaluate_high_card() {
+        let mut h = Hand::new();
+        h.add(card(Rank::Ace, Suit::Spades));
+        h.add(card(Rank::King, Suit::Hearts));
+        h.add(card(Rank::Ten, Suit::Clubs));
+        h.add(card(Rank::Five, Suit::Diamonds));
+        h.add(card(Rank::Two, Suit::Spades));
+        let rank = h.evaluate();
+        assert_eq!(rank.category, HandCategory::HighCard);
+    }
+
+    #[test]
+    fn evaluate_pair() {
+        let mut h = Hand::new();
+        h.add(card(Rank::Ace, Suit::Spades));
+        h.add(card(Rank::Ace, Suit::Hearts));
+        h.add(card(Rank::King, Suit::Clubs));
+        h.add(card(Rank::Ten, Suit::Diamonds));
+        h.add(card(Rank::Two, Suit::Spades));
+        let rank = h.evaluate();
+        assert_eq!(rank.category, HandCategory::Pair);
+    }
+
+    #[test]
+    fn evaluate_flush() {
+        let mut h = Hand::new();
+        for r in [Rank::Ace, Rank::King, Rank::Ten, Rank::Five, Rank::Two] {
+            h.add(card(r, Suit::Spades));
+        }
+        let rank = h.evaluate();
+        assert_eq!(rank.category, HandCategory::Flush);
+    }
+
+    #[test]
+    fn evaluate_straight() {
+        let mut h = Hand::new();
+        h.add(card(Rank::Nine, Suit::Spades));
+        h.add(card(Rank::Eight, Suit::Hearts));
+        h.add(card(Rank::Seven, Suit::Clubs));
+        h.add(card(Rank::Six, Suit::Diamonds));
+        h.add(card(Rank::Five, Suit::Spades));
+        let rank = h.evaluate();
+        assert_eq!(rank.category, HandCategory::Straight);
+    }
+
+    #[test]
+    fn evaluate_royal_flush() {
+        let mut h = Hand::new();
+        for r in [Rank::Ace, Rank::King, Rank::Queen, Rank::Jack, Rank::Ten] {
+            h.add(card(r, Suit::Hearts));
+        }
+        let rank = h.evaluate();
+        assert_eq!(rank.category, HandCategory::RoyalFlush);
+    }
+
+    #[test]
+    fn hand_rank_ordering() {
+        let mut high = Hand::new();
+        high.add(card(Rank::Ace, Suit::Spades));
+        high.add(card(Rank::King, Suit::Hearts));
+        high.add(card(Rank::Ten, Suit::Clubs));
+        high.add(card(Rank::Five, Suit::Diamonds));
+        high.add(card(Rank::Two, Suit::Spades));
+        let mut pair = Hand::new();
+        pair.add(card(Rank::Ace, Suit::Spades));
+        pair.add(card(Rank::Ace, Suit::Hearts));
+        pair.add(card(Rank::King, Suit::Clubs));
+        pair.add(card(Rank::Ten, Suit::Diamonds));
+        pair.add(card(Rank::Two, Suit::Spades));
+        assert_eq!(high.evaluate().category, HandCategory::HighCard);
+        assert_eq!(pair.evaluate().category, HandCategory::Pair);
+        assert!(pair.evaluate() > high.evaluate());
+    }
+}
+
 /// Trait for a deck that can deal cards
 pub trait DeckTrait {
     fn deal(&mut self, count: usize) -> Vec<Card>;

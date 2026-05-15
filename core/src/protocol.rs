@@ -261,3 +261,68 @@ impl std::fmt::Display for GameAction {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_response_success() {
+        let r = ServerResponse::success("OK");
+        assert!(r.success);
+        assert_eq!(r.message, "OK");
+    }
+
+    #[test]
+    fn server_response_error() {
+        let r = ServerResponse::error("Something failed");
+        assert!(!r.success);
+        assert_eq!(r.message, "Something failed");
+    }
+
+    #[test]
+    fn game_response_error() {
+        let r = GameResponse::error("Game not found");
+        assert!(!r.success);
+        assert_eq!(r.message, "Game not found");
+        assert!(r.game_id.is_none());
+        assert!(r.game_state.is_none());
+    }
+
+    #[test]
+    fn game_response_success() {
+        let state = GameStateUpdate {
+            game_id: "game-1".to_string(),
+            game_type: GameType::TexasHoldEm,
+            pot: 100,
+            current_bet: 10,
+            betting_round: BettingRound::PreFlop,
+            action_on: Some("player-1".to_string()),
+            player_count: 2,
+            players: vec![],
+            community_cards: vec![],
+            your_hand: vec!["A♠".to_string(), "K♥".to_string()],
+            your_chips: 500,
+        };
+        let r = GameResponse::success("Joined", "game-1".to_string(), state);
+        assert!(r.success);
+        assert_eq!(r.message, "Joined");
+        assert_eq!(r.game_id.as_deref(), Some("game-1"));
+        assert!(r.game_state.is_some());
+        let s = r.game_state.unwrap();
+        assert_eq!(s.pot, 100);
+        assert_eq!(s.your_chips, 500);
+    }
+
+    #[test]
+    fn game_type_display() {
+        assert_eq!(GameType::FiveCardDraw.to_string(), "Five Card Draw");
+        assert_eq!(GameType::TexasHoldEm.to_string(), "Texas Hold'em");
+    }
+
+    #[test]
+    fn game_action_display() {
+        assert_eq!(GameAction::Check.to_string(), "Check");
+        assert_eq!(GameAction::Bet { amount: 50 }.to_string(), "Bet $50");
+    }
+}
