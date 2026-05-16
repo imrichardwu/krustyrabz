@@ -1,60 +1,34 @@
 pub mod game;
 pub use game::Game;
 use uuid::Uuid; 
-use crate::client::{Message}; 
+use crate::client::{Message};
+use poker_core::{ ActionRequest, CreateGameRequest, GameAction, GameListResponse, GameResponse, 
+    GameStateUpdate, GameStatus, GameType, HouseRules, JoinGameRequest, PlayerStats, ServerResponses, StatsRequest, ViewerRequest
+}; 
 use std::sync::{Arc, Mutex};
-use std::collections::HashSet; 
-use future_util::{SinkExt, StreamExt}; 
-use rocket_ws::{self as ws, WebSocket); 
-use rocket::{get, launch, routes, State, serde::{Serialize, json::Json}};
+use std::collections::HashMap; 
+//use future_util::{SinkExt, StreamExt}; 
+use rocket::{get, launch, routes, State, Shutdown}; 
+use rocket::serde::{Serialize, Deserialize, json::Json}};
+//use rocket::response::stream::{EventStream, Event}; 
+//use rocket::tokio::sync::broadcast::{channel, Sender, error::RecvError};
+//use rocket::tokio::select; 
+//use rocket::form::Form; 
 use crate::storage::Repository; 
-
-/// This struct stores a serialized client message struct which contains 
-/// actions to execute on behalf of clients as well as action data.
-///
-/// The client message struct is defined as follows: 
-///
-///     #[derive(Serialize, Debug)]
-///     struct Message { 
-///         pub player Option<Player>, 
-///         pub viewer Option<Viewer>,
-///         pub bet Option<BetAction>, 
-///         pub bet_outcome Option<BettingOutcome>, 
-///         pub betting_rounds Option<BettingRounds>, 
-///         pub betting_state Option<BettingState>,
-///         pub join_game bool, 
-///         pub exit_game bool, 
-///         pub game_id Uuid, 
-///         pub pot u32
-///     }
-///
-#[derive(Debug, Serialize)] 
-#[serde(crate = "rocket::serde")] 
-struct Message {  
-    pub payload String 
-} 
 
 /// This data structure stores all currently live and pending games
 /// grouped by player count.
 ///
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct House { 
-    pub pending_games:     Arc<Mutex<Vec<Game>>>; 
-    pub twoplayer_games:   Arc<Mutex<Vec<Game>>>; 
-    pub threeplayer_games: Arc<Mutex<Vec<Game>>>; 
-    pub fourplayer_games:  Arc<Mutex<Vec<Game>>>; 
-    pub fiveplayer_games:  Arc<Mutex<Vec<Game>>> 
+    pub live_games:     Arc<Mutex<HashMap<String, Game>>>; 
 }
 
 impl House {
     pub fn new() -> Self {
-        //must clone
-        //consider factoring out into separate game_type discriminated groups  
-        let pending_games:     Arc::new(Mutex::new(vec![])); 
-        let twoplayer_games:   Arc::new(Mutex::new(vec![])); 
-        let threeplayer_games: Arc::new(Mutex::new(vec![])); 
-        let fourplayer_games:  Arc::new(Mutex::new(vec![])); 
-        let fiveplayer_games:  Arc::new(Mutex::new(vec![])) 
+        Self { 
+            let live_games:     Arc::new(Mutex::new(HashMap::new()), 
+        }
     }
 
     // Helper method, creates a game of the specified type. 
@@ -84,64 +58,61 @@ impl House {
         }
     }
 
-    // Helper method, locks the games data structure specified by search and 
+    // Helper method, locks the live_games data structure specified by search and
     // attempts to locate a free game inside it. 
     //
     // If optional parameter game_id is supplied, attempts to add a player to the 
     // game specified by that id. On success, invalidates the search group, 
     // removing the game with incremented player count and relocating it to target. 
     //
-    // If no optional parameter is supplied, finds the first free game and adds 
-    // the player to it, then moves that game to the group with incremented player 
-    // counts. 
+    // If no optional parameter is supplied, finds the first free game with minimal 
+    // player count and adds the player to it. 
     //
     // Parameters: 
     //      Player    - the player to add 
-    //      search    - the group of games to search 
-    //      target    - the group of games to target 
+    //      search    - the group of games to search
     //      game_type - the type of game requested by the player
     //      game_id   - optional, if adding the player to a specific game
     //
     // Returns: 
     //      Result<String, &'static String> 
-    pub fn lock_add_and_move(&mut self, player: &Player, 
-                                   search: &Arc<Mutex<Vec<Game>>>, 
-                                   target: &Arc<Mutex<Vec<Game>>>, 
+    pub fn lock_and_add(&mut self, player: &Player, 
+                                   search: &Arc<Mutex<HashMap<String, Game>>>, 
                                    game_type: String, 
                                    game_id Option<String>) Result<String, &'static String> {
-
-       match game_id { 
+        match game_id { 
            Some(value) => {
                     let search_group = search.clone(); 
-                    let mut locked_search_group = search_group.lock.unwrap(); 
-                    for game in locked_search_group.iter_mut() { 
-                        if game.game_id == game_id { 
+                    let mut locked_search_group = search_group.lock.unwrap();
+                    match locked_search_group.get(game_id) { 
+                        Some(game) => {
                             match game.table.seat_player(&player) { 
                                 Ok(()) => { 
-                                    let target_group = target.clone(); 
-                                    let mut locked_target_group = target_group.lock.unwrap(); 
-                                    locked_target_group.push(game); 
-                                    locked_search_group.retain(|&g| g.game_id != game_id); 
-                                    return Ok(game.game_Id) 
+                                    let target_group = search.clone(); 
+                                    let mut locked_target_group = search_group.lock.unwrap(); 
+                                    locked_target_group.insert(game_id, game); 
+                                    return Ok(game.game_id) 
                                 }, 
-                                Err(_) => { continue } 
+                                Err(_) => Err(format!("Failed adding player to game: {}", game_id));  
                             }
-                        }
+                        }, 
+                        None => Err(format!("Failed to find game: {}", game_id) 
                     }
            }, 
+           //if no game_id supplied, just join the first available game 
            None => {
                     let search_group = search.clone(); 
-                    let mut locked_search_group = search_group.lock.unwrap(); 
-                    for game in locked_search_group.iter_mut() { 
-                        if game.game_type.to_string() == game_type { 
+                    let mut locked_search_group = search_group.lock.unwrap();
+                    for (id, game) in locked_search_group.iter_mut() { 
+                        if game.game_type.to_string() == game_type
+                           && game.len() < 5{ 
                             match game.table.seat_player(&player) { 
                                 Ok(()) => {
-                                    let target_group = target.clone(); 
+                                    let target_group = search.clone(); 
                                     let mut locked_target_group = target_group.lock.unwrap(); 
                                     locked_target_group.push(game); 
-                                    locked_search_group.retain(|&g| g.game_id != game_id); 
                                     return Ok(game.game_Id) 
-                                }
+                                },
                                 Err(_) => { continue } 
                         }
                     }
@@ -158,16 +129,12 @@ impl House {
     //      player  - the player to remove from the table 
     //      game    - the game to remove the player from
     //      target  - the group to move the game into after reducing its player count
-    pub fn remove_player_from(game: &mut Game, player: &Player, target: &Arc<Mutex<Vec<Game>>>) {
+    pub fn remove_player_from(game: &mut Game, player: &Player, target: &Arc<Mutex<HashMap<String, Game>>>) {
     }
-
-    //TODO GIVE PLAYER OPTION TO SELECT A GAME FROM HOME SCREEN
 
     /// Locks and searches the live_games data structure in an attempt to locate 
     /// an open game (i.e. one with < 5 active players). If none are found, it 
-    /// creates a new game. For fairness, performs an ordered search of the House's 
-    /// games, beginning with pending (i.e. 1 player) games and continuing until 
-    /// a game with an open seat is located. This prevents player "starvation". 
+    /// creates a new game.
     ///
     /// Parameters:
     ///     player    - the player to add to a table 
@@ -177,119 +144,25 @@ impl House {
     ///    Result<String, 'static String> 
     ///     
     pub fn find_player_an_open_table(&mut self, player: &Player, game_type: String) Result<Uuid, &'static String>{
-        if &self.pending_games.len() > 0 { 
-            let from_one_player  = &House.pending_games; 
-            let into_two_players = &House.twoplayer_games; 
-            lock_add_and_move(player, from_one_player, into_two_players, game_type); 
-            Ok(())
-        }
-        else if &self.twoplayer_games.len() > 0 {
-            let from_two_players     = &House.twoplayer_games; 
-            let into_three_players   = &House.threeplayer_games; 
-            lock_add_and_move(player, from_two_players, into_three_players, game_type);
-            Ok(())
-        }
-        else if &self.threeplayer_games.len() > 0 { 
-            let from_three_players = &House.threeplayer_games; 
-            let into_four_players  = &House.fourplayer_games; 
-            lock_add_and_move(player, from_three_players, into_four_players, game_type); 
-            Ok(())
-        }
-        else if &self.fourplayer_games.len() > 0 {
-            let from_four_players = &House.fourplayer_games; 
-            let into_five_players = &House.fiveplayer_games; 
-            lock_add_and_move(player, from_four_players, into_five_players, game_type); 
-            Ok(())
-        }
-        else {
-            //if no game of the requested type is found, create a new one
-            //and add the player to it
-            let mut new_game = self.create_new(game_type); 
-            new_game.table.seat_player(player); 
-            let mut locked_games = games.clone()
-                                        .lock()
-                                        .unwrap(); 
-            locked_games.push(new_game);  
-        }
-    }
-}
-
-/// Launches the server, state and database and mounts the route specified in 
-/// each mount call. 
-///
-/// Parameters: 
-///     None 
-///
-/// Returns: 
-///     None 
-#[launch] 
-fn open_casino() -> _ {
-    let db = match Repository::new().await {
-        Ok(db) => db, 
-        Err(err) => panic!("{}", err), 
-    }; 
-
-    rocket::build()
-        .manage(House::new())
-        .mount("/", routes![open_floor]) 
-        .mount("/game/<game_id>", routes![game])
-}
-
-
-/// Index or home page. Opens a WebSocket channel to a client, stores the 
-/// client's connection data in server state, displays a view of all active 
-/// and pending games, and accepts messages from the client. 
-/// 
-/// Parameters: 
-///     username: the username of the connecting client
-///     ws:       a request guard identifying a WebSocket requests (from docs) 
-///     gametype: String, the type of game requested by the client
-///
-/// Returns: 
-///      
-#[get("/open_floor")] 
-async fn open_floor(ws: ws::WebSocket, gametype: String, username: String, state: &State<House>) -> ws::Channel<'static> {
-    
-    ws.channel(move |mut stream| { 
-        Box::pin(async move { 
-            let id = Uuid::new_v4(); 
-
-            //construct a new player for client
-            {
-                let mut player = Player::new();
-                player.id = id;
-                player.username = username; 
-
-                stream.send()
-                      .await 
-                      .unwrap(); 
-
-                let result = find_player_an_open_table(gametype); 
-                match result { 
-                    Ok() => stream.send(format!("Added you to game {}", result),  
-                    Err() => stream.send("Failed to find you a new game.")
-                                   .await
-                                   .unwrap(); 
-                }
+        let games = &House.live_games; 
+        let result = lock_and_add(player, &House.live_games, game_type); 
+        match result { 
+            Ok(added) =>  {
+                Ok(result)
             }
-        })
-    }); 
+            Err(error) => {
+                    //if no game of the requested type is found, create a new one
+                    //and add the player to it
+                    let mut new_game = self.create_new(game_type); 
+                    new_game.table.seat_player(player); 
+                    let mut locked_games = games.clone()
+                                                .lock()
+                                                .unwrap(); 
+                    locked_games.push(new_game);  
+            }
+        }
 }
-                    
 
-/// Connects viewers and players to a livestream of the game specified 
-/// by game_id. Returns a string of that game's public state. 
-///
-/// TODO in phase 2, the string payload will be replaced with a view 
-/// (which will be written using the hypertext templating crate). 
-///
-/// Parameters: 
-///     game_id - str,  the id specifying the game to connect to 
-///     play    - bool, true if client player, false if viewer
-#[post("/games", format = "string")] 
-async fn games() -> Json {
-   format!("") 
-}
 
 ///
 ///
@@ -297,18 +170,8 @@ async fn games() -> Json {
 ///
 ///
 ///
-#[post("/games")] 
-async fn new_game() { 
-}
-
-///
-///
-///
-///
-///
-///
-#[post("/players/<player_id>/stats", format = "string")] 
-async fn stats(player_id: &str) -> Json { 
+#[post("/players/<player_id>/stats", format = "json", data = "<PlayerStats>")] 
+async fn get_stats(player_id: &str) -> Json { 
 } 
 
 /// 
@@ -317,7 +180,7 @@ async fn stats(player_id: &str) -> Json {
 ///
 ///
 ///
-#[post("/games/<game_id>/viewer", format = "string")] 
+#[post("/games/<game_id>/viewer", format = "json")] 
 async fn viewers(game_id: &str) { 
 }
 
@@ -337,14 +200,106 @@ pub async fn rules() {
 ///
 ///
 ///
-#[post("/games/<game_id>/action")]
-async fn action(game_id: &str) { 
+#[post("/games/<game_id>/action", format = "json", data = "<ActionRequest>")]
+async fn perform_action(request: ActionRequest) {
+    let inner_request = request.into_inner(); 
+    match inner_request.action { 
+        GameAction::Fold  => fold(inner_request),
+        GameAction::Check => check(inner_request), 
+        GameAction::Call  => call(inner_request), 
+        GameAction::Bet   => bet(inner_request), 
+        GameAction::Raise => raise(inner_request), 
+        GameAction::Draw  => draw(inner_request)  
+
+    }
 }
+
+///
+///
+async fn fold(request: ActionRequest) { 
+}
+
+/// 
+///
+async fn check(request: ActionRequest) { 
+}
+
+
+///
+///
+async fn call(request: ActionRequest) { 
+}
+
+///
+///
+async fn bet(request: ActionRequest) {
+}
+
+///
+///
+async fn raise(request: ActionRequest) { 
+}
+
+///
+///
+async fn draw(request: ActionRequest) { 
+}
+
+///
+///
+///
+#[post("/games")] 
+async fn create_game() { 
+
+}
+
+///
+///
+///
+#[get("/games")] 
+async fn list_games() {
+    let mut response = GameListResponse::new(); 
+    let search_group = search.clone(); 
+    let mut locked_search_group = search_group.lock.unwrap();
+    for (id, game) in locked_search_group.iter_mut() { 
+        let mut summary = GameSummary::new(); 
+        summary.game_id = id;
+        summary.game_type = game.game_type; 
+        summary.player_count = game.table.len(); 
+        summary.max_players = 5; 
+        summary.status = InProgress; 
+        //TODO summary.status + 
+    }
+}
+
 
 ///
 ///
 ///
 ///
 ///
+#[post("/games/<game_id>/join", format = "json", data = "<JoinGameRequest>")]
+async fn join_game(request: Json<JoinGameRequest>){
+    let inner_request = request.into_inner(); 
+
+}
+
+
 ///
-#[post("/")]
+///
+///
+#[post("/games", format = "json", data = "<CreateGameRequest")] 
+async fn create_game(request: Json<CreateGameRequest>){ 
+    let inner_request = request.into_inner(); 
+}
+
+///
+///
+///
+#[get("/games/<game_id>")] 
+pub async get_game(game_id: &str) { 
+    let mut GameStateUpdate = GameStateUpdate::new(); 
+    match game_id {
+        Some(id) if id
+    }
+}
