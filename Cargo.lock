@@ -3304,6 +3304,7 @@ dependencies = [
  "sqlx",
  "supabase_rs",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

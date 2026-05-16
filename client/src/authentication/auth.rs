@@ -3,7 +3,7 @@ use std::io;
 use dotenv::dotenv;
 use std::env;
 use storage::Repository;
-
+use uuid::Uuid;
 
 /// Authentication session containing user info and access token
 #[derive(Debug, Clone)]
@@ -125,7 +125,7 @@ pub async fn register() -> Result<AuthSession, String> {
         // create user in database
         let repository = Repository::new().await
             .map_err(|e| format!("Failed to create repository: {}", e))?;
-        let _user = repository.create_user(session_username.clone())
+        let _user = repository.create_user(session_username.clone(), auth_response.user.id.clone().parse::<Uuid>().unwrap())
             .await
             .map_err(|e| format!("Failed to create user in database: {}", e))?;
 

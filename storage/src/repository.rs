@@ -5,6 +5,7 @@ use sea_orm::DatabaseConnection;
 use crate::entities::UserAccount;
 use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 use sea_orm::prelude::Expr;
+use uuid::Uuid;
 
 /// Initialize and return a Supabase client using environment variables
 /// 
@@ -77,7 +78,7 @@ impl Repository {
     /// 
     /// # Returns
     /// Returns the created user model or a database error
-    pub async fn create_user(&self, username: String) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+    pub async fn create_user(&self, username: String, id: Uuid) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
         use crate::entities::UserAccount;
         use sea_orm::{Set, EntityTrait, QueryFilter, ColumnTrait};
         
@@ -87,7 +88,7 @@ impl Repository {
             rounds_played: Set(Some(0)),
             pots_won: Set(Some(0)),
             number_folds: Set(Some(0)),
-            ..Default::default()
+            id: Set(id.clone()),
         };
         
         UserAccount::insert(active_model)
