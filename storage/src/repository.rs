@@ -71,147 +71,125 @@ impl Repository {
         &self.db
     }
     
-    /// Create a new user account with default values
-    /// 
+    /// Create a new user account with default values.
+    /// Username must be unique; returns error if it is already taken.
+    ///
     /// # Arguments
-    /// * `username` - The username for the new user
-    /// 
+    /// * `username` - The username for the new user (must be unique)
+    /// * `id` - The user id from Supabase Auth (used as primary key)
+    ///
     /// # Returns
     /// Returns the created user model or a database error
     pub async fn create_user(&self, username: String, id: Uuid) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
         use crate::entities::UserAccount;
         use sea_orm::{Set, EntityTrait, QueryFilter, ColumnTrait};
-        
+
+        // Ensure username is unique before creating
+        let existing = UserAccount::find()
+            .filter(crate::entities::user_account::Column::Username.eq(&username))
+            .one(&self.db)
+            .await?;
+        if existing.is_some() {
+            return Err(format!("Username '{}' is already taken", username).into());
+        }
+
         let active_model = crate::entities::user_account::ActiveModel {
-            username: Set(username.clone()),
+            username: Set(username),
             token_balance: Set(Some(0.0)),
             rounds_played: Set(Some(0)),
             pots_won: Set(Some(0)),
             number_folds: Set(Some(0)),
-            id: Set(id.clone()),
+            id: Set(id),
         };
-        
+
         UserAccount::insert(active_model)
             .exec(&self.db)
             .await?;
-        
-        // Fetch the created user by username (which is unique)
-        UserAccount::find()
-            .filter(crate::entities::user_account::Column::Username.eq(username))
-            .one(&self.db)
-            .await?
-            .ok_or_else(|| sea_orm::DbErr::RecordNotFound("User not found after creation".to_string()))
-            .map_err(|e| e.into())
+
+        self.get_user_by_id(id).await
     }
 
-    pub async fn get_user_by_username(&self, username: String) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
-        let username_clone = username.clone();
-        
-        let user = UserAccount::find()
-            .filter(crate::entities::user_account::Column::Username.eq(username))
+    /// Get a user account by id (Supabase Auth id).
+    pub async fn get_user_by_id(&self, id: Uuid) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+        UserAccount::find_by_id(id)
             .one(&self.db)
             .await
-            .map_err(|e| -> Box<dyn std::error::Error> { Box::from(e) })?;
-        
-        user.ok_or_else(move || -> Box<dyn std::error::Error> {
-            Box::from(sea_orm::DbErr::RecordNotFound(format!("User with username '{}' not found", username_clone)))
-        })
+            .map_err(|e| -> Box<dyn std::error::Error> { Box::from(e) })?
+            .ok_or_else(|| -> Box<dyn std::error::Error> {
+                Box::from(sea_orm::DbErr::RecordNotFound(format!("User with id '{}' not found", id)))
+            })
     }
 
-    //pass negative to decrease and positive to increase 
-    pub async fn update_user_token_balance(&self, username: String, amount: f64) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> { 
+    //pass negative to decrease and positive to increase
+    pub async fn update_user_token_balance(&self, id: Uuid, amount: f64) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
         use crate::entities::UserAccount;
-        let username_clone = username.clone();
         let update_result = UserAccount::update_many()
             .col_expr(crate::entities::user_account::Column::TokenBalance, Expr::col(crate::entities::user_account::Column::TokenBalance).add(amount))
-            .filter(crate::entities::user_account::Column::Username.eq(username.clone()))
+            .filter(crate::entities::user_account::Column::Id.eq(id))
             .exec(&self.db)
             .await?;
-        
+
         if update_result.rows_affected == 0 {
-            return Err(format!("Failed to update token_balance for username '{}'", username_clone).into());
+            return Err(format!("Failed to update token_balance for user id '{}'", id).into());
         }
-        
-        // Fetch the updated user
-        UserAccount::find()
-            .filter(crate::entities::user_account::Column::Username.eq(username))
-            .one(&self.db)
-            .await?
-            .ok_or_else(|| format!("User '{}' not found after update", username_clone).into())
+
+        self.get_user_by_id(id).await
     }
 //could try to use generics to condense into single update method but it doesn't really matter for 4
 //attributes
-    pub async fn increase_rounds_played(&self, username: String, rounds: i32) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> { 
+    pub async fn increase_rounds_played(&self, id: Uuid, rounds: i32) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
         if rounds < 0 {
-            return Err(format!("Parameter error: rounds can only be >= 0, but '{}' passed instead", rounds).into());  
+            return Err(format!("Parameter error: rounds can only be >= 0, but '{}' passed instead", rounds).into());
         }
-        let username_clone = username.clone();
         let update_result = UserAccount::update_many()
             .col_expr(crate::entities::user_account::Column::RoundsPlayed, Expr::col(crate::entities::user_account::Column::RoundsPlayed).add(rounds))
-            .filter(crate::entities::user_account::Column::Username.eq(username.clone()))
+            .filter(crate::entities::user_account::Column::Id.eq(id))
             .exec(&self.db)
             .await?;
-        
+
         if update_result.rows_affected == 0 {
-            return Err(format!("Failed to update rounds_played for username '{}'", username_clone).into());
+            return Err(format!("Failed to update rounds_played for user id '{}'", id).into());
         }
-        
-        // Fetch the updated user
-        UserAccount::find()
-            .filter(crate::entities::user_account::Column::Username.eq(username))
-            .one(&self.db)
-            .await?
-            .ok_or_else(|| format!("User '{}' not found after update", username_clone).into())
+
+        self.get_user_by_id(id).await
     }
 
 //could try to use generics to condense into single update method but it doesn't really matter for 4
 //attributes
-    pub async fn increase_pots_won(&self, username: String, pots: i32) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> { 
+    pub async fn increase_pots_won(&self, id: Uuid, pots: i32) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
         use crate::entities::UserAccount;
         if pots < 0 {
-            return Err(format!("Parameter error: pots can only be >= 0, but '{}' passed instead", pots).into());  
+            return Err(format!("Parameter error: pots can only be >= 0, but '{}' passed instead", pots).into());
         }
-        let username_clone = username.clone();
         let update_result = UserAccount::update_many()
             .col_expr(crate::entities::user_account::Column::PotsWon, Expr::col(crate::entities::user_account::Column::PotsWon).add(pots))
-            .filter(crate::entities::user_account::Column::Username.eq(username.clone()))
+            .filter(crate::entities::user_account::Column::Id.eq(id))
             .exec(&self.db)
             .await?;
-        
+
         if update_result.rows_affected == 0 {
-            return Err(format!("Failed to update pots_won for username '{}'", username_clone).into());
+            return Err(format!("Failed to update pots_won for user id '{}'", id).into());
         }
-        
-        // Fetch the updated user
-        UserAccount::find()
-            .filter(crate::entities::user_account::Column::Username.eq(username))
-            .one(&self.db)
-            .await?
-            .ok_or_else(|| format!("User '{}' not found after update", username_clone).into())
+
+        self.get_user_by_id(id).await
     }
 
-    pub async fn increase_number_folds(&self, username: String, folds: i32) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> { 
+    pub async fn increase_number_folds(&self, id: Uuid, folds: i32) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
         use crate::entities::UserAccount;
         if folds < 0 {
-            return Err(format!("Parameter error: folds can only be >= 0, but '{}' passed instead", folds).into());  
+            return Err(format!("Parameter error: folds can only be >= 0, but '{}' passed instead", folds).into());
         }
-        let username_clone = username.clone();
         let update_result = UserAccount::update_many()
             .col_expr(crate::entities::user_account::Column::NumberFolds, Expr::col(crate::entities::user_account::Column::NumberFolds).add(folds))
-            .filter(crate::entities::user_account::Column::Username.eq(username.clone()))
+            .filter(crate::entities::user_account::Column::Id.eq(id))
             .exec(&self.db)
             .await?;
-        
+
         if update_result.rows_affected == 0 {
-            return Err(format!("Failed to update number_folds for username '{}'", username_clone).into());
+            return Err(format!("Failed to update number_folds for user id '{}'", id).into());
         }
-        
-        // Fetch the updated user
-        UserAccount::find()
-            .filter(crate::entities::user_account::Column::Username.eq(username))
-            .one(&self.db)
-            .await?
-            .ok_or_else(|| format!("User '{}' not found after update", username_clone).into())
+
+        self.get_user_by_id(id).await
     }
 }
 

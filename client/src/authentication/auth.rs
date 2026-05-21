@@ -122,12 +122,14 @@ pub async fn register() -> Result<AuthSession, String> {
 
         println!("User '{}' registered successfully!", session_username);
 
-        // create user in database
+        // create user in database (id from Supabase Auth; username must be unique)
+        let user_id = auth_response.user.id.parse::<Uuid>()
+            .map_err(|_| "Invalid user id from Supabase Auth".to_string())?;
         let repository = Repository::new().await
             .map_err(|e| format!("Failed to create repository: {}", e))?;
-        let _user = repository.create_user(session_username.clone(), auth_response.user.id.clone().parse::<Uuid>().unwrap())
+        let _user = repository.create_user(session_username.clone(), user_id)
             .await
-            .map_err(|e| format!("Failed to create user in database: {}", e))?;
+            .map_err(|e| format!("{}", e))?;
 
         Ok(AuthSession {
             access_token,
