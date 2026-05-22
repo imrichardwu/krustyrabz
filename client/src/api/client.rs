@@ -3,10 +3,16 @@
 // HTTP client for communicating with the Poker server using reqwest.
 
 use poker_core::{
-    ActionRequest, CreateGameRequest, GameAction, GameListResponse, GameResponse, GameStateUpdate,
-    GameType, HouseRules, JoinGameRequest, PlayerStats, ServerResponse, StatsRequest, ViewerRequest,
+    ActionRequest, AddChipsRequest, AddChipsResponse, CreateGameRequest, GameAction, GameListResponse,
+    GameResponse, GameStateUpdate, GameType, HouseRules, JoinGameRequest, PlayerStats, ServerResponse,
+    StatsRequest, ViewerRequest,
 };
 use reqwest::Client;
+// FOR PHASE 2 - use reqwest_eventsource::{Event, EventSource}; 
+// We should use server-sent events in Phase 2, with each client maintaining 
+// a long-lived connection to an event-stream of GameStateUpdates, and only hitting HTTP endpoints 
+// to perform specific actions (when allowed by the server). 
+
 
 /// HTTP client for communicating with the Poker server.
 pub struct PokerClient {
@@ -169,7 +175,7 @@ impl PokerClient {
     }
 
     // =========================================================================
-    // Player Info
+    // Player
     // =========================================================================
 
     /// Get player statistics.
@@ -184,6 +190,22 @@ impl PokerClient {
         Ok(response)
     }
 
+    /// Add chips to a player's account 
+    pub async fn add_chips(&self, player_id: &str, num: u32) -> Result<AddChipsResponse, ApiError> { 
+        let request = AddChipsRequest { 
+            player_id: player_id.to_string(), 
+            num_chips: num,
+        }; 
+        let response = self 
+            .client
+            .post(format!("{}/players/{}/addchips", self.base_url, player_id))
+            .json(&request) 
+            .send()
+            .await? 
+            .json() 
+            .await?; 
+        Ok(response)
+    }
     // =========================================================================
     // Viewer
     // =========================================================================
@@ -233,6 +255,18 @@ impl PokerClient {
             .await?;
         Ok(response)
     }
+
+    // =========================================================================
+    // Eventstream -- for phase 2  
+    // =========================================================================
+
+    // /// Viewers and players maintain a long-lived connection to this eventstream,
+    // /// receiving an infinite series of live game state updates. They hit the 
+    // /// HTTP endpoints defined in the methods above to perform specific actions.
+    // pub async fn connect_to_game(&self, game_id: &str) -> Result<ServerResponse, ApiError> { 
+    //    let mut es = EventSource::get(format!("{}/game/{}", self.base_url, game_id); 
+    //}
+
 }
 
 // =============================================================================

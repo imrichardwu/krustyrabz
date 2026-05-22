@@ -4,6 +4,7 @@
 // between the poker client and server using Rocket/reqwest.
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid; 
 
 // ============================================================================
 // Request Types (Client -> Server)
@@ -46,6 +47,13 @@ pub struct StatsRequest {
     pub player_id: String,
 }
 
+/// Request to add chips to a player's account. 
+#[derive(Debug, Clone, Serialize, Deserialize)] 
+pub struct AddChipsRequest{ 
+    pub player_id: String, 
+    pub num_chips: u32, 
+}
+
 // ============================================================================
 // Response Types (Server -> Client)
 // ============================================================================
@@ -69,6 +77,39 @@ impl ServerResponse {
         Self {
             success: false,
             message: message.into(),
+        }
+    }
+}
+
+/// Response when adding chips. 
+#[derive(Debug, Clone, Serialize, Deserialize)] 
+pub struct AddChipsResponse { 
+    pub success: bool, 
+    pub message: String, 
+    pub player_id: Uuid, 
+    pub credit_limit: u32,
+    pub chips_added: u32,
+}
+
+impl AddChipsResponse { 
+    pub fn success(message: impl Into<String>, player_id: Uuid, credit_limit: u32, chips_added: u32) -> Self { 
+        Self { 
+            success: true, 
+            message: message.into(), 
+            player_id: Some(player_id), 
+            credit_limit: Some(credit_limit), 
+            chips_added: Some(chips_added), 
+        }
+    }
+
+    pub fn error(message: impl Into<String>, credit_limit: u32) -> Self 
+    {
+        Self { 
+            success: false, 
+            message: message.into(), 
+            player_id: None, 
+            credit_limit: Some(credit_limit), 
+            chips_added: None, 
         }
     }
 }
