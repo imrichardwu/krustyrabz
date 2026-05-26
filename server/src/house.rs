@@ -174,7 +174,7 @@ async fn register_viewer(game_id: &str, request: Json<ViewerRequest>) -> Json<Vi
 
 
 #[post("/rules")] 
-pub async fn rules() -> Json<HouseRules> {
+pub async fn get_rules() -> Json<HouseRules> {
     let rules = HouseRules { 
         min_bet: 1, 
         max_bet: 65535, 
