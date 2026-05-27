@@ -10,7 +10,7 @@ pub struct Player {
     pub chips: u32,
     pub current_bet: u32, // Tracked for betting logic
     pub is_folded: bool,  // Tracked for game logic
-    pub game_id: Uuid,
+    pub game_id: Option<Uuid>,
 }
 
 impl Player {
@@ -22,7 +22,7 @@ impl Player {
             chips,
             current_bet: 0,
             is_folded: false,
-            game_id,
+            game_id: None, 
         }
     }
 

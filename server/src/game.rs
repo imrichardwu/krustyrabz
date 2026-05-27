@@ -13,7 +13,7 @@ pub struct SharedGameState {
 
     // Core Game
     pub dealer_idx: usize,
-    pub action_on: Option<Uuid>,
+    pub action_on: Option<Uuid>,  
 
     // Shared Betting Data
     pub betting_state: BettingState,

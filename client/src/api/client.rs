@@ -195,6 +195,7 @@ impl PokerClient {
         let request = AddChipsRequest { 
             player_id: player_id.to_string(), 
             num_chips: num,
+            credit_limit: 65535,
         }; 
         let response = self 
             .client

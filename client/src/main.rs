@@ -164,8 +164,9 @@ async fn main() {
             println!("1. List & Join Games");
             println!("2. Create New Game");
             println!("3. Watch a Game");
-            println!("4. Logout");
-            println!("5. Exit");
+            println!("4. Add Chips");
+            println!("5. Logout");
+            println!("6. Exit");
 
             let mut choice = String::new();
             std::io::stdin().read_line(&mut choice).expect("Failed to read line");
@@ -175,11 +176,23 @@ async fn main() {
                 "2" => create_new_game(&client, session.as_ref().unwrap()).await,
                 "3" => watch_game(&client, session.as_ref().unwrap()).await,
                 "4" => {
+                    println!("Enter amount of chips to add: ");
+                    let amount = read_input("Amount: ");
+                    let amount = amount.trim().parse::<u32>().unwrap();
+                    let response = client.add_chips(&session.as_ref().unwrap().user_id, amount).await;
+                    if response.is_ok() {
+                        println!("Chips added successfully.");
+                    } else {
+                        println!("Error adding chips: {}", response.err().unwrap());
+                    }
+                    continue;
+                }
+                "5" => {
                     session = None;
                     authenticated = false;
                     println!("Logged out successfully.");
                 }
-                "5" => {
+                "6" => {
                     println!("Exiting the game. Goodbye!");
                     break;
                 }
