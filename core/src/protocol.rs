@@ -51,7 +51,8 @@ pub struct StatsRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)] 
 pub struct AddChipsRequest{ 
     pub player_id: String, 
-    pub num_chips: u32, 
+    pub num_chips: u32,
+    pub credit_limit: 65535,
 }
 
 // ============================================================================
