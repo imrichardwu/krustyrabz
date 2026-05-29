@@ -2,8 +2,24 @@ use crate::betting::{BettingRound, BettingState};
 use crate::deck::Deck;
 use crate::player::Player;
 use crate::table::Table;
+use poker_core::hand::{Hand, HandRank};
+use poker_core::{Card, CardType, Rank, Suit};
+use strum::IntoEnumIterator;
 use strum_macros::Display;
 use uuid::Uuid;
+
+/// Converts a deck index (0..52) to a Card using the same order as Deck::construct():
+/// suit then rank (Clubs 2..A, Diamonds 2..A, Hearts 2..A, Spades 2..A).
+fn deck_index_to_card(i: u8) -> Option<Card> {
+    if i >= 52 {
+        return None;
+    }
+    let suit_idx = (i / 13) as usize;
+    let rank_idx = (i % 13) as usize;
+    let suit = Suit::iter().nth(suit_idx)?;
+    let rank = Rank::iter().nth(rank_idx)?;
+    Some(Card::construct(rank, suit, CardType::Private))
+}
 
 #[derive(Debug, Clone)]
 pub struct SharedGameState {
@@ -211,35 +227,95 @@ impl SharedGameState {
     /// Evaluates all hands, splits the pot, and pays the winner(s).
     /// Returns a list of (PlayerId, AmountWon) for notification.
     ///
-    /// TODO: Implement proper hand evaluation once server Player type
-    /// uses the Hand type from poker_core instead of Vec<u8>
+    /// Player hands are stored as Vec<u8> (deck indices 0..52). Indices use the same
+    /// order as Deck::construct(): suit then rank (Clubs 2..A, Diamonds 2..A, etc.).
+    /// Supports 5-card hands (e.g. Five Card Draw) and 7-card hands (e.g. Stud); for 7
+    /// cards the best 5-card hand is evaluated.
     pub fn resolve_showdown(&mut self) -> Vec<(Uuid, u32)> {
-        // TODO: Implement hand evaluation
-        // Current server Player has hand: Vec<u8>, but we need Hand type with evaluate()
-        // For now, just return empty results
-        
-        let active_players: Vec<Uuid> = self
+        let active_players: Vec<(Uuid, Vec<u8>)> = self
             .table
             .players
             .iter()
             .filter(|p| !p.is_folded)
-            .map(|p| p.id)
+            .map(|p| (p.id, p.hand.clone()))
             .collect();
 
         if active_players.is_empty() {
             return Vec::new();
         }
 
-        // TODO: Proper hand evaluation - for now, first active player wins
-        let winner_id = active_players[0];
-        let payout = self.pot;
+        let pot = self.pot;
+        if pot == 0 {
+            return Vec::new();
+        }
 
-        if let Some(player) = self.table.get_player_mut(winner_id) {
-            player.chips += payout;
+        // Build (player_id, HandRank) for each player with a valid evaluable hand
+        let mut evaluated: Vec<(Uuid, HandRank)> = Vec::with_capacity(active_players.len());
+        for (player_id, indices) in &active_players {
+            let cards: Vec<Card> = indices
+                .iter()
+                .filter_map(|&i| deck_index_to_card(i))
+                .collect();
+
+            let hand_rank = match cards.len() {
+                5 => {
+                    let mut hand = Hand::new();
+                    for c in &cards {
+                        hand.add(*c);
+                    }
+                    hand.evaluate()
+                }
+                7 => {
+                    let mut hand = Hand::new();
+                    for c in &cards {
+                        hand.add(*c);
+                    }
+                    hand.evaluate()
+                }
+                _ => continue, // Skip players without 5 or 7 cards
+            };
+            evaluated.push((*player_id, hand_rank));
+        }
+
+        if evaluated.is_empty() {
+            return Vec::new();
+        }
+
+        // Find best hand rank
+        let best_rank = evaluated
+            .iter()
+            .map(|(_, r)| r)
+            .max()
+            .expect("at least one evaluated hand");
+
+        // All players with the best rank win (split pot)
+        let winners: Vec<Uuid> = evaluated
+            .iter()
+            .filter(|(_, r)| r == best_rank)
+            .map(|(id, _)| *id)
+            .collect();
+
+        let num_winners = winners.len() as u32;
+        let base_payout = pot / num_winners;
+        let remainder = pot % num_winners;
+
+        for (i, &winner_id) in winners.iter().enumerate() {
+            let payout = base_payout + if (i as u32) < remainder { 1 } else { 0 };
+            if let Some(player) = self.table.get_player_mut(winner_id) {
+                player.chips += payout;
+            }
         }
 
         self.pot = 0;
-        vec![(winner_id, payout)]
+
+        winners
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| {
+                let payout = base_payout + if (i as u32) < remainder { 1 } else { 0 };
+                (id, payout)
+            })
+            .collect()
     }
 
     /// Cleans up state to prepare for the next hand
