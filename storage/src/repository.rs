@@ -200,11 +200,19 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use std::env;
+
+    /// Requires SUPABASE_URL and SUPABASE_KEY in environment or .env.
+    /// Run with: `cargo test -p storage --lib -- --ignored` when credentials are set.
     #[tokio::test]
+    #[ignore = "requires SUPABASE_URL and SUPABASE_KEY in .env; run with --ignored when set"]
     async fn test_create_client() {
-        // This test will only work if .env file is present with valid credentials
+        dotenv().ok();
+        if env::var("SUPABASE_URL").is_err() || env::var("SUPABASE_KEY").is_err() {
+            eprintln!("Skipping test_create_client: SUPABASE_URL/SUPABASE_KEY not set");
+            return;
+        }
         let result = create_supabase_client().await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "create_supabase_client failed: {:?}", result.err());
     }
 }
