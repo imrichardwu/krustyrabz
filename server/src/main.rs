@@ -33,6 +33,7 @@ fn rocket() -> _ {
                 house::get_game,
                 house::perform_action,
                 house::get_stats,
+                house::add_chips,
                 house::register_viewer,
                 house::get_rules,
             ],

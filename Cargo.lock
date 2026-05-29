@@ -2904,6 +2904,7 @@ dependencies = [
  "serde_json",
  "storage",
  "strum 0.27.2",
+ "strum_macros",
  "tokio",
  "uuid",
 ]

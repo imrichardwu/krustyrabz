@@ -1,401 +1,476 @@
-pub mod game;
-pub use game::Game;
-use uuid::Uuid; 
-use crate::client::{Message};
-use poker_core::{ ActionRequest, CreateGameRequest, GameAction, GameListResponse, GameResponse, 
-    GameStateUpdate, GameStatus, GameType, HouseRules, JoinGameRequest, PlayerStats, ServerResponses, StatsRequest, ViewerRequest
-}; 
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap; 
-//use future_util::{SinkExt, StreamExt}; 
-use rocket::{get, launch, routes, State, Shutdown}; 
-use rocket::serde::{Serialize, Deserialize, json::Json}};
-//use rocket::response::stream::{EventStream, Event}; 
-//use rocket::tokio::sync::broadcast::{channel, Sender, error::RecvError};
-//use rocket::tokio::select; 
-//use rocket::form::Form; 
-use crate::storage::Repository; 
+// House Module - Poker Game Server
+//
+// This module contains the House struct which manages all live games,
+// and provides HTTP route handlers for the Rocket web framework.
 
-/// This data structure stores all currently live and pending games
-/// grouped by player count.
-///
-#[derive(Serialize, Debug)]
-pub struct House { 
-    pub live_games:     Arc<Mutex<HashMap<String, Game>>>; 
+use uuid::Uuid;
+use crate::game::Game;
+use poker_core::{
+    ActionRequest, AddChipsRequest, AddChipsResponse, CreateGameRequest,
+    GameListResponse, GameResponse, GameStateUpdate, GameSummary, GameType, 
+    HouseRules, JoinGameRequest, PlayerInfo, PlayerStats, ServerResponse,
+};
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use rocket::{get, post, State};
+use rocket::serde::json::Json;
+
+use crate::game::{FiveCardDraw, SevenCardStud, TexasHoldEm};
+use crate::player::Player;
+
+// ============================================================================
+// House Structure
+// ============================================================================
+
+/// This data structure stores all currently live and pending games.
+/// Games are stored in a HashMap keyed by game_id (as String for protocol compatibility).
+#[derive(Debug)]
+pub struct House {
+    pub live_games: Arc<Mutex<HashMap<String, Game>>>,
 }
 
 impl House {
     pub fn new() -> Self {
-        Self { 
-            let live_games:     Arc::new(Mutex::new(HashMap::new()), 
+        Self {
+            live_games: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    // Helper method, creates a game of the specified type. 
-    //
-    // Parameters: 
-    //      GameType - the type of game to create 
-    //
-    // Returns: 
-    //      None 
-    pub fn create_new(variant : Game) -> Result<Game, 'static String> { 
-        match variant { 
-            Game::FiveCardDraw(_)  => { 
-                let game = FiveCardDraw::new()?; 
+    // ========================================================================
+    // Game Management Helper Methods
+    // ========================================================================
+
+    /// Helper method to create a new game of the specified type.
+    ///
+    /// Parameters:
+    ///     game_type - The type of game to create (FiveCardDraw, SevenCardStud, TexasHoldEm)
+    ///
+    /// Returns:
+    ///     Result<Game, String> - The created game or an error message
+    pub fn create_new_game(&self, game_type: GameType) -> Result<Game, String> {
+        match game_type {
+            GameType::FiveCardDraw => {
+                let game = FiveCardDraw::new();
                 Ok(Game::FiveCardDraw(game))
-            },
-            _ => Err("Failed to create new game of Five Card Draw"), 
-            Game::SevenCardStud(_) => {
-                let game = SevenCardStud::new()?; 
+            }
+            GameType::SevenCardStud => {
+                let game = SevenCardStud::new();
                 Ok(Game::SevenCardStud(game))
-            },
-            _ => Err("Failed to create new game of Seven Card Stud"), 
-            Game::TexasHoldEm(_) => { 
-                let game = TexasHoldEm::new()?; 
+            }
+            GameType::TexasHoldEm => {
+                let game = TexasHoldEm::new();
                 Ok(Game::TexasHoldEm(game))
-            },
-            _ => Err("Failed to create new game of Texas Hold 'Em")
+            }
         }
     }
 
-    // Helper method, locks the live_games data structure specified by search and
-    // attempts to locate a free game inside it. 
-    //
-    // If optional parameter game_id is supplied, attempts to add a player to the 
-    // game specified by that id. 
-    //
-    //Parameters: 
-    //      Player    - the player to add 
-    //      search    - the group of games to search
-    //      game_type - the type of game requested by the player
-    //      game_id   - optional, if adding the player to a specific game
-    //
-    // Returns: 
-    //      Result<String, &'static String> 
-    pub fn lock_and_add(&mut self, player: &Player, 
-                                   search: &Arc<Mutex<HashMap<String, Game>>>, 
-                                   game_type: Option<String>, 
-                                   game_id Option<String>) Result<Game, &'static String> {
-        match game_id { 
-           Some(value) => {
-                    let search_group = search.clone(); 
-                    let mut locked_search_group = search_group.lock.unwrap();
-                    match locked_search_group.get(game_id) { 
-                        Some(game) => {
-                            match game.table.seat_player(&player) { 
-                                Ok(()) => return Ok(game), 
-                                Err(_) => Err(format!("Failed adding player to game: {}", game_id));  
-                            }
-                        }, 
-                        None => Err(format!("Failed to find game: {}", game_id) 
+    /// Helper method to lock the live_games HashMap and attempt to add a player
+    /// to a specific game or find an open game.
+    ///
+    /// If game_id is provided, attempts to add the player to that specific game.
+    /// If game_id is None, searches for the first available game of the requested type.
+    ///
+    /// Parameters:
+    ///     player    - The player to add
+    ///     game_type - Optional game type to search for
+    ///     game_id   - Optional specific game ID to join
+    ///
+    /// Returns:
+    ///     Result<String, String> - The game_id on success, or an error message
+    pub fn lock_and_add(
+        &self,
+        player: Player,
+        game_type: Option<GameType>,
+        game_id: Option<String>,
+    ) -> Result<String, String> {
+        let mut games = self.live_games.lock().unwrap();
+
+        match game_id {
+            Some(id) => {
+                // Try to join specific game
+                match games.get_mut(&id) {
+                    Some(game) => {
+                        game.add_player(player)?;
+                        Ok(id)
                     }
-           }, 
-           //if no game_id supplied, just join the first available game 
-           None => {
-                    let search_group = search.clone(); 
-                    let mut locked_search_group = search_group.lock.unwrap();
-                    for (id, game) in locked_search_group.iter_mut() { 
-                        if game.game_type.to_string() == game_type
-                           && game.len() < 5{ 
-                            match game.table.seat_player(&player) { 
-                                Ok(()) => return Ok(game),
-                                Err(_) => continue 
+                    None => Err(format!("Game not found: {}", id)),
+                }
+            }
+            None => {
+                // Find first available game of requested type
+                if let Some(requested_type) = game_type {
+                    for (id, game) in games.iter_mut() {
+                        if game.get_game_type() == requested_type && !game.is_full() {
+                            match game.add_player(player.clone()) {
+                                Ok(_) => return Ok(id.clone()),
+                                Err(_) => continue,
+                            }
                         }
                     }
                 }
+                Err("No available game found".to_string())
             }
-       } 
-       return Err(format!("Failed adding player {} to game of type {}", player.id, game_type));
+        }
     }
 
-    // Helper method, on client disconnect, removes the dropped player from the game 
-    // and relocates that game to the group with decremented player counts. 
-    //
-    // Parameters: 
-    //      player  - the player to remove from the table 
-    //      game    - the game to remove the player from
-    //      target  - the group to move the game into after reducing its player count
-    pub fn remove_player_from(game: &mut Game, player: &Player, target: &Arc<Mutex<HashMap<String, Game) {
-    }
-
-    //TODO could change to polling with timeout. this implementation is extremely simple and 
-    //just gives up if no open game found, doesn't consider if another player 
-    //added a new game after the check was completed
-    /// Locks and searches the live_games data structure in an attempt to locate 
-    /// an open game (i.e. one with < 5 active players). If none are found, it 
-    /// creates a new game.
+    /// Helper method to remove a player from a game when they disconnect.
     ///
     /// Parameters:
-    ///     player    - the player to add to a table 
-    ///     game_type - the type of game requested by the player  
+    ///     game_id   - The game to remove the player from
+    ///     player_id - The player to remove
     ///
-    /// Returns: 
-    ///    Result<String, 'static String> 
-    ///     
-    pub fn find_player_an_open_table(&mut self, house: &State<House>, player: &Player, game_type: String) Result<Uuid, &'static String>{
-        let games = &house.live_games; 
-        let result = lock_and_add(player, games, game_type); 
-        match result { 
-            Ok(added) =>  {
-                Ok(result)
+    /// Returns:
+    ///     Result<(), String>
+    pub fn remove_player(&self, game_id: &str, player_id: Uuid) -> Result<(), String> {
+        let mut games = self.live_games.lock().unwrap();
+        match games.get_mut(game_id) {
+            Some(game) => {
+                game.remove_player(player_id)?;
+                // TODO: If game is empty, consider removing it from live_games
+                Ok(())
             }
-            Err(error) => {
-                    //if no game of the requested type is found, create a new one
-                    //and add the player to it
-                    let mut new_game = self.create_new(game_type); 
-                    new_game.core.table.seat_player(player); 
-                    let mut locked_games = games.clone()
-                                                .lock()
-                                                .unwrap(); 
-                    locked_games.insert(new_game.game_id, new_game);  
+            None => Err(format!("Game not found: {}", game_id)),
+        }
+    }
+
+    /// Attempts to find an open game for the player. If no open game is found,
+    /// creates a new one and adds the player to it.
+    ///
+    /// Parameters:
+    ///     player    - The player to seat at a table
+    ///     game_type - The type of game requested
+    ///
+    /// Returns:
+    ///     Result<String, String> - The game_id on success
+    pub fn find_or_create_game(&self, player: Player, game_type: GameType) -> Result<String, String> {
+        // Try to find an existing game
+        let result = self.lock_and_add(player.clone(), Some(game_type), None);
+
+        match result {
+            Ok(game_id) => Ok(game_id),
+            Err(_) => {
+                // No game found, create a new one
+                let mut new_game = self.create_new_game(game_type)?;
+                let game_id = new_game.get_game_id().to_string();
+                new_game.add_player(player)?;
+
+                let mut games = self.live_games.lock().unwrap();
+                games.insert(game_id.clone(), new_game);
+
+                Ok(game_id)
             }
         }
+    }
 }
 
-#[post("/players/<player_id>/stats", format = "json", data = "<PlayerStats>")] 
-async fn get_stats(player_id: &str) -> Json<PlayerStats> {
-    let player = db.get_user_by_id(player_id).await.ok()?; 
-    let response =  PlayerStats { 
-        player_id: player_id, 
-        username: player.username, 
-        chips: player.chips, 
-        current_bet: player.current_bet, 
-        folded: player.folded, 
-        is_dealer: false, 
-        cards_count: player.hand.len(), 
-    }; 
-    Json(response)
-} 
-
-#[post("/games/<game_id>/viewers", format = "json", data = "<ViewerRequest>")] 
-async fn register_viewer(game_id: &str, request: Json<ViewerRequest>) -> Json<ViewerRequest> { 
-//TODO do we need to register viewers? can we not just send them game state updates ? 
+impl Default for House {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
+// ============================================================================
+// HTTP Route Handlers
+// ============================================================================
 
-#[post("/rules")] 
+/// Health check / ping endpoint
+#[get("/")]
+pub async fn index() -> Json<ServerResponse> {
+    Json(ServerResponse::success("Poker server is running"))
+}
+
+/// Returns the house rules for all games.
+#[get("/rules")]
 pub async fn get_rules() -> Json<HouseRules> {
-    let rules = HouseRules { 
-        min_bet: 1, 
-        max_bet: 65535, 
-        max_raises_per_round: 3, 
-        starting_chips: 500, 
-        ante: 100, 
-        small_blind: 50, 
-        big_blind: 100, 
-    }; 
-    return Json(rules) 
+    let rules = HouseRules {
+        min_bet: 1,
+        max_bet: 65535,
+        max_raises_per_round: 3,
+        starting_chips: 500,
+        ante: 100,
+        small_blind: 50,
+        big_blind: 100,
+    };
+    Json(rules)
 }
 
-///
-///
-///
-#[post("/games/<game_id>/action", format = "json", data = "<ActionRequest>")]
-async fn perform_action(request: Json<ActionRequest>) {
-    let inner_request = request.into_inner(); 
-    match inner_request.action { 
-        GameAction::Fold  => fold(inner_request),
-        GameAction::Check => check(inner_request), 
-        GameAction::Call  => call(inner_request), 
-        GameAction::Bet   => bet(inner_request), 
-        GameAction::Raise => raise(inner_request), 
-        GameAction::Draw  => draw(inner_request)  
+/// Returns a list of all games, including those waiting for players
+/// and those currently in-progress.
+#[get("/games")]
+pub async fn list_games(house: &State<House>) -> Json<GameListResponse> {
+    let games = house.live_games.lock().unwrap();
+    let mut game_list = Vec::new();
 
+    for (id, game) in games.iter() {
+        let summary = GameSummary {
+            game_id: id.clone(),
+            game_type: game.get_game_type(),
+            player_count: game.get_player_count(),
+            max_players: game.get_max_players(),
+            status: game.get_status(),
+            pot: game.get_pot(),
+        };
+        game_list.push(summary);
     }
+
+    Json(GameListResponse { games: game_list })
 }
 
+/// Creates a new game and adds the requesting player to it.
 ///
-///
-async fn fold(request: ActionRequest) { 
-}
-
-/// 
-///
-async fn check(request: ActionRequest) { 
-}
-
-
-///
-///
-async fn call(request: ActionRequest) { 
-}
-
-///
-///
-async fn bet(request: ActionRequest) {
-}
-
-///
-///
-async fn raise(request: ActionRequest) { 
-}
-
-///
-///
-async fn draw(request: ActionRequest) { 
-}
-
-
-/// Attempts to add the number of requested chips to the account belonging 
-/// to the player specified in the request. Validates that a player can 
-/// "afford" that number of chips using some unrealistic worldbuilding which 
-/// gives all players credit limits of 65,535 and has them pay the balances 
-/// in full after every gambling session. This means that a client's chip 
-/// request will always be approved provided (token_balance + num_chips_requested) 
-/// <= 65535.  
-///
-///
-#[post("/players/<player_id>/addchips", format = "json", data = "<AddChipsRequest>")] 
-async fn add_chips(request: Json<AddChipsRequest>, db: &State<DatabaseConnection>) -> Json<AddChipsResponse>{ 
+/// Request body should contain:
+///     - player_id: String
+///     - username: String
+///     - game_type: GameType
+#[post("/games", format = "json", data = "<request>")]
+pub async fn create_game(
+    request: Json<CreateGameRequest>,
+    house: &State<House>,
+) -> Json<GameResponse> {
     let inner_request = request.into_inner();
-    let id = inner_request.player_id; 
-    let num_chips = inner_request.num_chips; 
-    let credit_limit = inner_request.credit_limit; 
-    let user_account = db.get_user_by_id(id).await.ok()?; 
-    let token_balance = user_account.token_balance; 
-    let charge = (token_balance, num_chips); 
-    match charge { 
-        (balance, num_chips) if balance + num_chips > 65535 { 
-            let message = "Error: insufficient funds. No chips were added to your account."; 
-            let response = AddChipsResponse::error(message, id, credit_limit, 0); 
-            return Json(response)
-        }, 
-        (balance, num_chips) if balance + num_chips <= 65535 { 
-            let result = db.update_user_token_balance(id, num_chips); 
-            match result { 
-                Ok(model) => { 
-                    let message = format!("Success: added {} chips to your account.", num_chips);
-                    let response = AddChipsResponse::success(message, id, credit_limit, num_chips);
-                    return Json(response)
-                }, 
-                Err() => { 
-                    let message = "Error: user has sufficient funds, but the write to the database failed."; 
-                    let response = AddChipsResponse::error(message, id, credit_limit, 0);
-                    return Json(response); 
-                }
-            }
+
+    // TODO: Fetch player from database to get their chip balance
+    // For now, create player with default starting chips
+    let player = Player::new(inner_request.username.clone(), 500);
+
+    let mut new_game = match house.create_new_game(inner_request.game_type) {
+        Ok(game) => game,
+        Err(e) => return Json(GameResponse::error(format!("Failed to create game: {}", e))),
+    };
+
+    let game_id = new_game.get_game_id().to_string();
+
+    match new_game.add_player(player) {
+        Ok(_) => {
+            let mut games = house.live_games.lock().unwrap();
+            games.insert(game_id.clone(), new_game);
+
+            // TODO: Build proper GameStateUpdate from game state
+            let message = format!("Game created successfully. Waiting for players in game {}", game_id);
+            Json(GameResponse {
+                success: true,
+                message,
+                game_id: Some(game_id),
+                game_state: None, // TODO: Add game state
+            })
         }
+        Err(e) => Json(GameResponse::error(format!("Failed to add player to game: {}", e))),
     }
 }
 
-/// Returns a list of all games, including those waiting for players 
-/// and those currently in-progress. 
+/// Adds a player to an existing game.
 ///
-#[get("/games")] 
-async fn list_games() -> Json<GameListResponse> {
-    let mut response = GameListResponse::new(); 
-    let search_group = search.clone(); 
-    let mut locked_search_group = search_group.lock.unwrap();
-    for (id, game) in locked_search_group.iter_mut() { 
-        let mut summary = GameSummary::new(); 
-        summary.game_id = id;
-        summary.game_type = game.game_type; 
-        summary.player_count = game.table.len(); 
-        summary.max_players = 5; 
-        summary.status = GameStatus::WaitingForPlayers;
-        summary.pot = game.pot; 
-        response.push(summary); 
-    }
-    Json(response); 
-}
+/// Request body should contain:
+///     - player_id: String
+///     - username: String
+///     - game_id: String
+#[post("/games/<game_id>/join", format = "json", data = "<request>")]
+pub async fn join_game(
+    game_id: String,
+    request: Json<JoinGameRequest>,
+    house: &State<House>,
+) -> Json<GameResponse> {
+    let inner_request = request.into_inner();
 
-/// Adds the player to the game specified by the request's game_id field. 
-///
-#[post("/games/<game_id>/join", format = "json", data = "<JoinGameRequest>")]
-async fn join_game(request: Json<JoinGameRequest>, house: &State<House>){
-    let inner_request = request.into_inner(); 
-    
-    let account = db.get_user_by_id(id).await().ok()?; 
-    let mut player = Player::new(); 
-    let game_id = inner_request.game_id; 
-    player.id = inner_request.player_id; 
-    player.username = inner_request.username; 
-    player.game_id = game_id; 
-    player.chips = account.token_balance; 
+    // TODO: Fetch player from database to get their chip balance
+    let player = Player::new(inner_request.username.clone(), 500);
 
-    let games = &house.live_games; 
-    
-    let result = lock_and_add(player, games, None, player.game_id); 
-    match result { 
-        Ok(game) => { 
-            let message = format!("Success: now playing game {}", game_id); 
-            let state = GameStateUpdate { 
-                game_id: game.game_id, 
-                game_type: Game::FiveCardDraw, 
-                pot:  game.core.pot, 
-                current_bet: 0, //TODO fix this 
-                betting_round: game.betting_round, 
-                action_on: game.core.action_on, 
-                player_count: game.core.table.get_player_count(), 
-                players: game.core.table.players, 
-                community_cards = vec![],  //TODO fix this 
-                your_hand = vec![], 
-                your_chips = player.chips, 
-            }; 
-            let response = GameResponse::success(message, game_id, state);
-            return Json(response); 
-        }, 
-        Err() => { 
-            let message = format!("Error: unable to join game {}", game_id); 
-            let response = GameResponse::error(message, game_id, None);
-            return Json(response); 
+    let result = house.lock_and_add(player, None, Some(game_id.clone()));
+
+    match result {
+        Ok(joined_game_id) => {
+            let message = format!("Successfully joined game {}", joined_game_id);
+            // TODO: Build proper GameStateUpdate from game state
+            Json(GameResponse {
+                success: true,
+                message,
+                game_id: Some(joined_game_id),
+                game_state: None, // TODO: Add game state
+            })
         }
+        Err(e) => Json(GameResponse::error(format!("Failed to join game: {}", e))),
     }
 }
 
-
-/// Creates a new game and adds the player to it.
+/// Returns the current state of a specific game.
 ///
-#[post("/games", format = "json", data = "<CreateGameRequest")] 
-async fn create_game(request: Json<CreateGameRequest>, house: &State<House>) -> Json<GameResponse>{ 
-    let inner_request = request.into_inner(); 
-    let account = db.get_user_by_id(id).await().ok()?; 
-    let mut player = Player {  
-        player.id: inner_request.player_id, 
-        player.username:  inner_request.username,  
-        player.chips:  account.token_balance
-    }; 
+/// Query parameters:
+///     - player_id: String (required, to provide player-specific view)
+#[get("/games/<game_id>?<player_id>")]
+pub async fn get_game(
+    game_id: String,
+    player_id: String,
+    house: &State<House>,
+) -> Option<Json<GameStateUpdate>> {
+    let games = house.live_games.lock().unwrap();
 
-    let mut new_game = self.create_new(game_type); 
-    new_game.table.seat_player(player);
-    let games = &house.live_games; 
-    let mut locked_games = games.clone()
-                                .lock()
-                                .unwrap(); 
-    locked_games.insert(new_game.game_id, new_game); 
-
-    let message = format!("Success: started new game. Waiting for players in game {}", game_id); 
-    let response = GameResponse::success(message, new_game.game_id, None); 
-    Json(response); 
+    games.get(&game_id).map(|game| {
+        // TODO: Build proper GameStateUpdate from game state
+        // This should include player-specific information like their hand
+        let state = build_game_state_update(game, Some(&player_id));
+        Json(state)
+    })
 }
 
-/// Returns the current state of the game specified by game_id 
+/// Performs a game action (fold, check, call, bet, raise, draw).
 ///
-#[get("/games/<game_id>")] 
-pub async get_game(game_id: &str, player_id: &str, house: &State<House>) -> Json<GameResponse>{ 
-    let games = &house.live_games; 
-    let mut locked_games = games.clone()
-                                .lock()
-                                .unwrap(); 
-    let result = locked_games.get(game_id); 
-    match result { 
-        Some(game) => { 
-            let state = GameStateUpdate { 
-                game_id: game.game_id, 
-                game_type: Game::FiveCardDraw, 
-                pot:  game.core.pot, 
-                current_bet: 0, //TODO fix this 
-                betting_round: game.betting_round, 
-                action_on: game.core.action_on, 
-                player_count: game.core.table.get_player_count(), 
-                players: game.core.table.players, 
-                community_cards = vec![],  //TODO fix this 
-                your_hand = vec![], 
-                your_chips = player.chips, 
-            }; 
-            return Json(GameResponse::success("Found game", game_id, state)); 
-        }, 
-        None() => { 
-            return Json(GameResponse::error("Couldn't find game", game_id, None));
-        }
+/// Request body should contain:
+///     - player_id: String
+///     - game_id: String
+///     - action: GameAction
+#[post("/games/<_game_id>/action", format = "json", data = "<_request>")]
+pub async fn perform_action(
+    _game_id: String,
+    _request: Json<ActionRequest>,
+    _house: &State<House>,
+) -> Json<GameResponse> {
+
+    // TODO: Parse player_id from String to Uuid
+    // TODO: Look up game and perform action
+    // TODO: Return updated game state
+
+    // Placeholder implementation
+    Json(GameResponse::error("Action handling not yet implemented".to_string()))
+}
+
+/// Returns statistics for a specific player.
+///
+/// TODO: This should query the database for player stats
+#[get("/players/<player_id>/stats")]
+pub async fn get_stats(player_id: String) -> Json<PlayerStats> {
+    // TODO: Query database for player stats
+    // Placeholder response
+    Json(poker_core::PlayerStats {
+        player_id,
+        username: "Unknown".to_string(),
+        rounds_played: 0,
+        pots_won: 0,
+        folds: 0,
+        total_winnings: 0,
+        current_balance: 0,
+    })
+}
+
+/// Adds chips to a player's account.
+///
+/// This validates that the player can "afford" the chips using a credit system
+/// where all players have a credit limit of 65,535.
+///
+/// Request body should contain:
+///     - player_id: String
+///     - num_chips: u32
+///     - credit_limit: u32
+#[post("/players/<player_id>/addchips", format = "json", data = "<_request>")]
+pub async fn add_chips(
+    player_id: String,
+    _request: Json<AddChipsRequest>,
+) -> Json<AddChipsResponse> {
+
+    // TODO: Parse player_id String to Uuid
+    // TODO: Fetch user from database
+    // TODO: Validate credit limit
+    // TODO: Update token balance
+
+    // Placeholder implementation
+    let player_uuid = Uuid::parse_str(&player_id).unwrap_or_default();
+    Json(AddChipsResponse::error(
+        "Add chips not yet implemented",
+        player_uuid,
+        65535,
+    ))
+}
+
+/// Registers a viewer for a game.
+///
+/// TODO: Decide if we need to register viewers or just send them game state updates
+#[post("/games/<_game_id>/viewers", format = "json", data = "<_request>")]
+pub async fn register_viewer(
+    _game_id: String,
+    _request: Json<poker_core::ViewerRequest>,
+) -> Json<ServerResponse> {
+    // TODO: Implement viewer registration
+    Json(ServerResponse::error("Viewer registration not yet implemented"))
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Builds a GameStateUpdate from the current game state.
+///
+/// This converts internal game representation to the protocol type
+/// that can be sent to clients.
+///
+/// TODO: Implement proper conversion logic
+fn build_game_state_update(game: &Game, _player_id: Option<&str>) -> GameStateUpdate {
+    // Placeholder implementation
+    GameStateUpdate {
+        game_id: game.get_game_id().to_string(),
+        game_type: game.get_game_type(),
+        pot: game.get_pot(),
+        current_bet: 0, // TODO: Get from game state
+        betting_round: poker_core::BettingRound::PreDraw, // TODO: Get from game state
+        action_on: None, // TODO: Get from game state
+        player_count: game.get_player_count(),
+        players: vec![], // TODO: Build player info list
+        community_cards: vec![], // TODO: For Texas Hold'em
+        your_hand: vec![], // TODO: Get player's hand if player_id provided
+        your_chips: 0, // TODO: Get player's chips
+    }
+}
+
+/// Converts a Player to PlayerInfo for protocol communication.
+///
+/// PlayerInfo hides the player's actual cards and only shows card count.
+fn player_to_info(player: &Player, is_dealer: bool) -> PlayerInfo {
+    PlayerInfo {
+        username: player.username.clone(),
+        chips: player.chips,
+        current_bet: player.current_bet,
+        folded: player.is_folded,
+        is_dealer,
+        cards_count: player.hand.len(),
+    }
+}
+
+// ============================================================================
+// Action Handler Stubs
+// ============================================================================
+// These functions will be called by perform_action based on the action type.
+// They need to be implemented with proper game logic.
+
+/// Handles a fold action.
+async fn fold(_game_id: String, _player_id: Uuid) -> Result<(), String> {
+    // TODO: Implement fold logic
+    Err("Not implemented".to_string())
+}
+
+/// Handles a check action.
+async fn check(_game_id: String, _player_id: Uuid) -> Result<(), String> {
+    // TODO: Implement check logic
+    Err("Not implemented".to_string())
+}
+
+/// Handles a call action.
+async fn call(_game_id: String, _player_id: Uuid) -> Result<(), String> {
+    // TODO: Implement call logic
+    Err("Not implemented".to_string())
+}
+
+/// Handles a bet action.
+async fn bet(_game_id: String, _player_id: Uuid, _amount: u32) -> Result<(), String> {
+    // TODO: Implement bet logic
+    Err("Not implemented".to_string())
+}
+
+/// Handles a raise action.
+async fn raise(_game_id: String, _player_id: Uuid, _amount: u32) -> Result<(), String> {
+    // TODO: Implement raise logic
+    Err("Not implemented".to_string())
+}
+
+/// Handles a draw action (for Five Card Draw).
+async fn draw(_game_id: String, _player_id: Uuid, _discard_indices: Vec<usize>) -> Result<(), String> {
+    // TODO: Implement draw logic
+    Err("Not implemented".to_string())
 }

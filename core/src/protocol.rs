@@ -52,7 +52,7 @@ pub struct StatsRequest {
 pub struct AddChipsRequest{ 
     pub player_id: String, 
     pub num_chips: u32,
-    pub credit_limit: 65535,
+    pub credit_limit: u32,
 }
 
 // ============================================================================
@@ -97,20 +97,20 @@ impl AddChipsResponse {
         Self { 
             success: true, 
             message: message.into(), 
-            player_id: Some(player_id), 
-            credit_limit: Some(credit_limit), 
-            chips_added: Some(chips_added), 
+            player_id, 
+            credit_limit,
+            chips_added,
         }
     }
 
-    pub fn error(message: impl Into<String>, credit_limit: u32) -> Self 
+    pub fn error(message: impl Into<String>, player_id: Uuid, credit_limit: u32) -> Self 
     {
         Self { 
             success: false, 
             message: message.into(), 
-            player_id: None, 
-            credit_limit: Some(credit_limit), 
-            chips_added: None, 
+            player_id,
+            credit_limit,
+            chips_added: 0,
         }
     }
 }

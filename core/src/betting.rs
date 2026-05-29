@@ -1,7 +1,5 @@
-use uuid::Uuid;
 
-#[derive(Debug, Clone)]
-pub enum BetAction {
+#[derive(Debug, Clone)]pub enum BetAction {
     Check,
     Call,
     Bet { amount: u32 },
