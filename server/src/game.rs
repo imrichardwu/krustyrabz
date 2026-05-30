@@ -2,24 +2,9 @@ use crate::betting::{BettingRound, BettingState};
 use crate::deck::Deck;
 use crate::player::Player;
 use crate::table::Table;
-use poker_core::hand::{Hand, HandRank};
-use poker_core::{Card, CardType, Rank, Suit};
-use strum::IntoEnumIterator;
+use poker_core::{DeckTrait, GameType, GameStatus};
 use strum_macros::Display;
 use uuid::Uuid;
-
-/// Converts a deck index (0..52) to a Card using the same order as Deck::construct():
-/// suit then rank (Clubs 2..A, Diamonds 2..A, Hearts 2..A, Spades 2..A).
-fn deck_index_to_card(i: u8) -> Option<Card> {
-    if i >= 52 {
-        return None;
-    }
-    let suit_idx = (i / 13) as usize;
-    let rank_idx = (i % 13) as usize;
-    let suit = Suit::iter().nth(suit_idx)?;
-    let rank = Rank::iter().nth(rank_idx)?;
-    Some(Card::construct(rank, suit, CardType::Private))
-}
 
 #[derive(Debug, Clone)]
 pub struct SharedGameState {
@@ -136,7 +121,7 @@ impl SharedGameState {
     pub fn process_betting_action(
         &mut self,
         player_id: Uuid,
-        action: poker_core::GameAction,
+        action: poker_core::protocol::GameAction,
     ) -> Result<bool, String> {
         if self.action_on != Some(player_id) {
             return Err("not_your_turn".to_string());
@@ -147,23 +132,23 @@ impl SharedGameState {
         let to_call = self.betting_state.to_call;
 
         match action {
-            poker_core::GameAction::Fold => {
+            poker_core::protocol::GameAction::Fold => {
                 let player = self.table.get_player_mut(player_id).unwrap();
                 player.is_folded = true;
             }
 
-            poker_core::GameAction::Check => {
+            poker_core::protocol::GameAction::Check => {
                 if current_contribution < to_call {
                     return Err("cannot_check_must_call".to_string());
                 }
             }
 
-            poker_core::GameAction::Call => {
+            poker_core::protocol::GameAction::Call => {
                 let needed = to_call.saturating_sub(current_contribution);
                 self.post_bet(player_id, needed)?;
             }
 
-            poker_core::GameAction::Bet { amount } => {
+            poker_core::protocol::GameAction::Bet { amount } => {
                 if to_call > 0 {
                     return Err("cannot_bet_must_raise".to_string());
                 }
@@ -178,7 +163,7 @@ impl SharedGameState {
                 self.betting_state.last_aggressor = Some(player_id);
             }
 
-            poker_core::GameAction::Raise { amount } => {
+            poker_core::protocol::GameAction::Raise { amount } => {
                 if to_call == 0 {
                     return Err("cannot_raise_must_bet".to_string());
                 }
@@ -226,96 +211,53 @@ impl SharedGameState {
 
     /// Evaluates all hands, splits the pot, and pays the winner(s).
     /// Returns a list of (PlayerId, AmountWon) for notification.
-    ///
-    /// Player hands are stored as Vec<u8> (deck indices 0..52). Indices use the same
-    /// order as Deck::construct(): suit then rank (Clubs 2..A, Diamonds 2..A, etc.).
-    /// Supports 5-card hands (e.g. Five Card Draw) and 7-card hands (e.g. Stud); for 7
-    /// cards the best 5-card hand is evaluated.
     pub fn resolve_showdown(&mut self) -> Vec<(Uuid, u32)> {
-        let active_players: Vec<(Uuid, Vec<u8>)> = self
+        let mut candidates: Vec<(Uuid, poker_core::hand::HandRank)> = self
             .table
             .players
             .iter()
             .filter(|p| !p.is_folded)
-            .map(|p| (p.id, p.hand.clone()))
+            .map(|p| (p.id, p.hand.evaluate())) // evaluate() from hand.rs
             .collect();
 
-        if active_players.is_empty() {
+        if candidates.is_empty() {
             return Vec::new();
         }
 
-        let pot = self.pot;
-        if pot == 0 {
-            return Vec::new();
-        }
+        // sort descending (Best hand first)
+        candidates.sort_by(|a, b| b.1.cmp(&a.1));
 
-        // Build (player_id, HandRank) for each player with a valid evaluable hand
-        let mut evaluated: Vec<(Uuid, HandRank)> = Vec::with_capacity(active_players.len());
-        for (player_id, indices) in &active_players {
-            let cards: Vec<Card> = indices
-                .iter()
-                .filter_map(|&i| deck_index_to_card(i))
-                .collect();
+        let best_rank = &candidates[0].1;
 
-            let hand_rank = match cards.len() {
-                5 => {
-                    let mut hand = Hand::new();
-                    for c in &cards {
-                        hand.add(*c);
-                    }
-                    hand.evaluate()
-                }
-                7 => {
-                    let mut hand = Hand::new();
-                    for c in &cards {
-                        hand.add(*c);
-                    }
-                    hand.evaluate()
-                }
-                _ => continue, // Skip players without 5 or 7 cards
-            };
-            evaluated.push((*player_id, hand_rank));
-        }
-
-        if evaluated.is_empty() {
-            return Vec::new();
-        }
-
-        // Find best hand rank
-        let best_rank = evaluated
+        // identify winners
+        let winners: Vec<Uuid> = candidates
             .iter()
-            .map(|(_, r)| r)
-            .max()
-            .expect("at least one evaluated hand");
-
-        // All players with the best rank win (split pot)
-        let winners: Vec<Uuid> = evaluated
-            .iter()
-            .filter(|(_, r)| r == best_rank)
+            .take_while(|(_, rank)| rank == best_rank)
             .map(|(id, _)| *id)
             .collect();
 
-        let num_winners = winners.len() as u32;
-        let base_payout = pot / num_winners;
-        let remainder = pot % num_winners;
+        // Split Pot TODO MIGHT NEED REWORKING THIS IS A SIMPLE IMPLEMENTATION
+        let count = winners.len() as u32;
+        let share = self.pot / count;
+        let mut remainder = self.pot % count;
 
-        for (i, &winner_id) in winners.iter().enumerate() {
-            let payout = base_payout + if (i as u32) < remainder { 1 } else { 0 };
+        let mut results = Vec::new();
+
+        for winner_id in winners {
+            let mut payout = share;
+            if remainder > 0 {
+                payout += 1;
+                remainder -= 1;
+            }
+
             if let Some(player) = self.table.get_player_mut(winner_id) {
                 player.chips += payout;
+                results.push((winner_id, payout));
             }
         }
 
         self.pot = 0;
-
-        winners
-            .iter()
-            .enumerate()
-            .map(|(i, &id)| {
-                let payout = base_payout + if (i as u32) < remainder { 1 } else { 0 };
-                (id, payout)
-            })
-            .collect()
+        results
     }
 
     /// Cleans up state to prepare for the next hand
@@ -362,7 +304,14 @@ pub enum Game {
 }
 
 impl Game {
-    /// Returns the game_id as a Uuid
+    pub fn get_game_type(&self) -> GameType {
+        match self {
+            Game::FiveCardDraw(_) => GameType::FiveCardDraw,
+            Game::SevenCardStud(_) => GameType::SevenCardStud,
+            Game::TexasHoldEm(_) => GameType::TexasHoldEm,
+        }
+    }
+
     pub fn get_game_id(&self) -> Uuid {
         match self {
             Game::FiveCardDraw(game) => game.game_id,
@@ -371,34 +320,14 @@ impl Game {
         }
     }
 
-    /// Returns the game type
-    pub fn get_game_type(&self) -> poker_core::GameType {
-        match self {
-            Game::FiveCardDraw(_) => poker_core::GameType::FiveCardDraw,
-            Game::SevenCardStud(_) => poker_core::GameType::SevenCardStud,
-            Game::TexasHoldEm(_) => poker_core::GameType::TexasHoldEm,
-        }
-    }
-
-    /// Returns the current pot size
-    pub fn get_pot(&self) -> u32 {
-        match self {
-            Game::FiveCardDraw(game) => game.core.pot,
-            Game::SevenCardStud(game) => game.core.pot,
-            Game::TexasHoldEm(game) => game.core.pot,
-        }
-    }
-
-    /// Returns the number of players currently in the game
     pub fn get_player_count(&self) -> usize {
         match self {
-            Game::FiveCardDraw(game) => game.core.table.players.len(),
-            Game::SevenCardStud(game) => game.core.table.players.len(),
-            Game::TexasHoldEm(game) => game.core.table.players.len(),
+            Game::FiveCardDraw(game) => game.core.table.get_player_count(),
+            Game::SevenCardStud(game) => game.core.table.get_player_count(),
+            Game::TexasHoldEm(game) => game.core.table.get_player_count(),
         }
     }
 
-    /// Returns the maximum number of players allowed
     pub fn get_max_players(&self) -> usize {
         match self {
             Game::FiveCardDraw(game) => game.core.table.max_players,
@@ -407,42 +336,49 @@ impl Game {
         }
     }
 
-    /// Returns true if the table is full
+    pub fn get_pot(&self) -> u32 {
+        match self {
+            Game::FiveCardDraw(game) => game.core.pot,
+            Game::SevenCardStud(game) => game.core.pot,
+            Game::TexasHoldEm(game) => game.core.pot,
+        }
+    }
+
+    pub fn get_status(&self) -> GameStatus {
+        match self {
+            Game::FiveCardDraw(game) => {
+                if game.betting_round == BettingRound::PreDeal {
+                    GameStatus::WaitingForPlayers
+                } else {
+                    GameStatus::InProgress
+                }
+            }
+            Game::SevenCardStud(game) => {
+                if game.betting_round == BettingRound::PreDeal {
+                    GameStatus::WaitingForPlayers
+                } else {
+                    GameStatus::InProgress
+                }
+            }
+            Game::TexasHoldEm(game) => {
+                if game.betting_round == BettingRound::PreDeal {
+                    GameStatus::WaitingForPlayers
+                } else {
+                    GameStatus::InProgress
+                }
+            }
+        }
+    }
+
     pub fn is_full(&self) -> bool {
-        self.get_player_count() >= self.get_max_players()
-    }
-
-    /// Returns the current game status
-    pub fn get_status(&self) -> poker_core::GameStatus {
         match self {
-            Game::FiveCardDraw(game) => {
-                if game.core.table.players.len() < 2 {
-                    poker_core::GameStatus::WaitingForPlayers
-                } else if game.betting_round == BettingRound::PreDeal {
-                    poker_core::GameStatus::WaitingForPlayers
-                } else {
-                    poker_core::GameStatus::InProgress
-                }
-            }
-            Game::SevenCardStud(game) => {
-                if game.core.table.players.len() < 2 {
-                    poker_core::GameStatus::WaitingForPlayers
-                } else {
-                    poker_core::GameStatus::InProgress
-                }
-            }
-            Game::TexasHoldEm(game) => {
-                if game.core.table.players.len() < 2 {
-                    poker_core::GameStatus::WaitingForPlayers
-                } else {
-                    poker_core::GameStatus::InProgress
-                }
-            }
+            Game::FiveCardDraw(game) => game.core.table.is_full(),
+            Game::SevenCardStud(game) => game.core.table.is_full(),
+            Game::TexasHoldEm(game) => game.core.table.is_full(),
         }
     }
 
-    /// Adds a player to the game
-    pub fn add_player(&mut self, player: crate::player::Player) -> Result<(), String> {
+    pub fn add_player(&mut self, player: Player) -> Result<(), String> {
         match self {
             Game::FiveCardDraw(game) => {
                 game.core.table.seat_player(player)
@@ -459,7 +395,6 @@ impl Game {
         }
     }
 
-    /// Removes a player from the game
     pub fn remove_player(&mut self, player_id: Uuid) -> Result<(), String> {
         match self {
             Game::FiveCardDraw(game) => {
@@ -501,7 +436,7 @@ impl FiveCardDraw {
     pub fn predraw_betting(
         &mut self,
         player_id: Uuid,
-        action: poker_core::GameAction,
+        action: poker_core::protocol::GameAction,
     ) -> Result<(), String> {
         if self.betting_round != BettingRound::PreDraw {
             return Err("wrong_phase".to_string());
@@ -520,7 +455,7 @@ impl FiveCardDraw {
     pub fn postdraw_betting(
         &mut self,
         player_id: Uuid,
-        action: poker_core::GameAction,
+        action: poker_core::protocol::GameAction,
     ) -> Result<(), String> {
         if self.betting_round != BettingRound::PostDraw {
             return Err("wrong_phase".to_string());
@@ -572,10 +507,6 @@ impl FiveCardDraw {
         self.betting_round = BettingRound::PreDeal;
     }
 
-    /// Handles a player's draw action (discarding and drawing new cards).
-    ///
-    /// TODO: Implement proper draw logic once server Player type
-    /// uses the Hand type from poker_core with draw() method
     pub fn handle_draw_action(
         &mut self,
         player_id: Uuid,
@@ -592,11 +523,14 @@ impl FiveCardDraw {
             return Err("too_many_discards".to_string());
         }
 
-        // TODO: Implement card drawing
-        // Current server Player has hand: Vec<u8>, not Hand type with draw()
-        // For now, just advance the action without actually drawing cards
-        let _player = self.core.table.get_player_mut(player_id).unwrap();
-        // player.draw(&mut self.core.deck, &discard_indices)?;
+        let mut unique_indices = discard_indices.clone();
+        unique_indices.sort_unstable();
+        unique_indices.dedup();
+        let count = unique_indices.len();
+
+        let new_cards = self.core.deck.deal(count);
+        let player = self.core.table.get_player_mut(player_id).unwrap();
+        player.draw(&discard_indices, new_cards)?;
 
         // pass true because the next person might be All-In
         if !self.core.advance_action(true) {
@@ -606,10 +540,6 @@ impl FiveCardDraw {
         Ok(())
     }
 }
-
-// ============================================================================
-// Seven Card Stud
-// ============================================================================
 
 #[derive(Debug, Clone)]
 pub struct SevenCardStud {
@@ -622,47 +552,25 @@ impl SevenCardStud {
     pub fn new() -> Self {
         Self {
             game_id: Uuid::new_v4(),
-            core: SharedGameState::new(7), // Seven Card Stud typically allows more players
+            core: SharedGameState::new(7),
             betting_round: BettingRound::PreDeal,
         }
     }
-
-    // TODO: Implement Seven Card Stud game logic
-    // - Deal initial cards (2 down, 1 up)
-    // - Betting rounds for each street (3rd, 4th, 5th, 6th, River)
-    // - Showdown
 }
-
-// ============================================================================
-// Texas Hold'em
-// ============================================================================
 
 #[derive(Debug, Clone)]
 pub struct TexasHoldEm {
     pub game_id: Uuid,
     pub core: SharedGameState,
     pub betting_round: BettingRound,
-    pub community_cards: Vec<poker_core::Card>,
 }
 
 impl TexasHoldEm {
     pub fn new() -> Self {
         Self {
             game_id: Uuid::new_v4(),
-            core: SharedGameState::new(9), // Texas Hold'em can have up to 9-10 players
+            core: SharedGameState::new(9),
             betting_round: BettingRound::PreDeal,
-            community_cards: Vec::new(),
         }
     }
-
-    // TODO: Implement Texas Hold'em game logic
-    // - Deal hole cards (2 cards per player)
-    // - PreFlop betting
-    // - Deal Flop (3 community cards)
-    // - Flop betting
-    // - Deal Turn (1 community card)
-    // - Turn betting
-    // - Deal River (1 community card)
-    // - River betting
-    // - Showdown
 }

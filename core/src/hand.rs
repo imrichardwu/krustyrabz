@@ -38,6 +38,7 @@ impl PartialOrd for HandRank {
         Some(self.cmp(other))
     }
 }
+#[derive(Debug, Clone)]
 pub struct Hand {
     // Increased to 7 to support SevenCardStud and Hold'em (best 5 of 7)
     // For 5-Card Draw, we just use the first 5 slots.
@@ -265,6 +266,12 @@ impl Hand {
 
     pub fn remove_at(&mut self, index: usize) -> Card { self.cards.remove(index) }
 
+}
+
+impl Default for Hand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]

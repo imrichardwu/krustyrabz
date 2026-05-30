@@ -1,5 +1,6 @@
 use uuid::Uuid;
 use rocket::serde::{Serialize, Deserialize};
+use poker_core::{Hand, Card};
 
 
 // Player Statistics
@@ -57,7 +58,8 @@ pub struct Player {
     pub id: Uuid,
     pub username: String,
     pub chips: u32,
-    pub hand: Vec<u8>,  // Card indices
+    #[serde(skip, default)]
+    pub hand: Hand,
     pub is_folded: bool,
     pub current_bet: u32,
 }
@@ -68,7 +70,7 @@ impl Player {
             id: Uuid::new_v4(),
             username,
             chips: starting_chips,
-            hand: Vec::new(),
+            hand: Hand::new(),
             is_folded: false,
             current_bet: 0,
         }
@@ -76,6 +78,34 @@ impl Player {
 
     pub fn username(&self) -> &str {
         &self.username
+    }
+
+    /// Discard cards at the given indices (descending, deduped), then add the new cards.
+    /// Caller must deal exactly `unique_discard_count` cards and pass them here.
+    pub fn draw(&mut self, discard_indices: &[usize], new_cards: Vec<Card>) -> Result<(), String> {
+        for &idx in discard_indices {
+            if idx >= self.hand.len() {
+                return Err("Invalid card index".to_string());
+            }
+        }
+
+        let mut sorted_indices = discard_indices.to_vec();
+        sorted_indices.sort_unstable_by(|a, b| b.cmp(a));
+        sorted_indices.dedup();
+
+        if new_cards.len() != sorted_indices.len() {
+            return Err("New cards count must match number of unique discard indices".to_string());
+        }
+
+        for &i in &sorted_indices {
+            self.hand.remove_at(i);
+        }
+
+        for card in new_cards {
+            self.hand.add(card);
+        }
+
+        Ok(())
     }
 }
 
