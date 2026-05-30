@@ -17,8 +17,9 @@ pub async fn create_and_play_game(
 ) -> Result<(), ApiError> {
     let game_name = match game_type {
         GameType::FiveCardDraw => "Five Card Draw",
-        GameType::SevenCardStud => "Seven Card Stud",
-        GameType::TexasHoldEm => "Texas Hold'em",
+        // GameType::SevenCardStud => "Seven Card Stud",
+        // GameType::TexasHoldEm => "Texas Hold'em",
+        _ => "Unknown Game Type",
     };
     
     println!("\nCreating new {} game...", game_name);
