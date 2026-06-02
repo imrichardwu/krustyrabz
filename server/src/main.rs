@@ -14,6 +14,7 @@ pub mod player;
 pub mod table;
 
 use house::House;
+use storage::establish_connection; 
 
 /// Launches the Rocket server with the House state and all routes mounted.
 #[launch]
@@ -21,8 +22,12 @@ fn rocket() -> _ {
     println!("Starting Poker Server...");
     println!("Server will be available at http://127.0.0.1:8000");
 
+    let db = establish_connection().await?; 
+    Ok(()); 
+
     rocket::build()
         .manage(House::new())
+        .manage(db)
         .mount(
             "/",
             routes![
