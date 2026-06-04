@@ -378,6 +378,14 @@ impl Game {
         }
     }
 
+    pub fn is_empty(&self) -> bool { 
+        match self { 
+            Game::FiveCardDraw(game) => game.core.table.is_empty(), 
+            Game::SevenCardStud(game) => game.core.table.is_empty(), 
+            Game::TexasHoldEm(game) => game.core.table.is_empty(), 
+        }
+    }
+
     pub fn add_player(&mut self, player: Player) -> Result<(), String> {
         match self {
             Game::FiveCardDraw(game) => {

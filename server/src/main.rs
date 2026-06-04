@@ -14,7 +14,8 @@ pub mod player;
 pub mod table;
 
 use house::House;
-use storage::establish_connection; 
+use storage::establish_connection;
+use tokio::runtime::Runtime; 
 
 /// Launches the Rocket server with the House state and all routes mounted.
 #[launch]
@@ -22,8 +23,13 @@ fn rocket() -> _ {
     println!("Starting Poker Server...");
     println!("Server will be available at http://127.0.0.1:8000");
 
-    let db = establish_connection().await?; 
-    Ok(()); 
+    // We need a Tokio runtime here to block the async call to establish_connection, 
+    // because [launch] functions cannot be async 
+    let rt = Runtime::new().expect("Failed to create Tokio runtime"); 
+    let db = rt
+        .block_on(establish_connection())
+        .expect("Failed to establish connection"); 
+    
 
     rocket::build()
         .manage(House::new())

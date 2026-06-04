@@ -15,6 +15,8 @@ use std::collections::HashMap;
 use rocket::{get, post, State};
 use rocket::serde::json::Json;
 
+use storage::DatabaseConnection; 
+
 use crate::game::{FiveCardDraw, SevenCardStud, TexasHoldEm};
 use crate::player::Player;
 
@@ -127,9 +129,9 @@ impl House {
             Some(game) => {
                 game.remove_player(player_id)?;
                 // TODO: If game is empty, consider removing it from live_games
-                Ok(())
-            }
-            None => Err(format!("Game not found: {}", game_id)),
+                Ok(()) 
+            },
+            None => Err(format!("Game not found: {}", game_id).to_string()),
         }
     }
 
@@ -226,6 +228,7 @@ pub async fn list_games(house: &State<House>) -> Json<GameListResponse> {
 pub async fn create_game(
     request: Json<CreateGameRequest>,
     house: &State<House>,
+    db: &State<DatabaseConnection>
 ) -> Json<GameResponse> {
     let inner_request = request.into_inner();
 
