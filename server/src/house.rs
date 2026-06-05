@@ -115,6 +115,12 @@ impl House {
         }
     }
 
+    pub fn remove_game(&self, game_id: &str) -> Result<(), String> { 
+        let mut games = self.live_games.lock().unwrap(); 
+        games.remove(game_id).ok_or(format!("Failed to remove game: {}", game_id))?;
+        Ok(())
+    }
+
     /// Helper method to remove a player from a game when they disconnect.
     ///
     /// Parameters:
@@ -129,6 +135,7 @@ impl House {
             Some(game) => {
                 game.remove_player(player_id)?;
                 // TODO: If game is empty, consider removing it from live_games
+                if game.is_empty() { self.remove_game(game_id); }
                 Ok(()) 
             },
             None => Err(format!("Game not found: {}", game_id).to_string()),

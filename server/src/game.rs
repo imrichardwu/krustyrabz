@@ -441,6 +441,10 @@ impl FiveCardDraw {
         }
     }
 
+    pub fn get_id(&self) -> String { 
+        self.game_id.to_string()
+    }
+
     pub fn predraw_betting(
         &mut self,
         player_id: Uuid,
