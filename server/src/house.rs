@@ -9,16 +9,20 @@ use poker_core::{
     ActionRequest, AddChipsRequest, AddChipsResponse, CreateGameRequest,
     GameListResponse, GameResponse, GameStateUpdate, GameSummary, GameType, 
     HouseRules, JoinGameRequest, PlayerInfo, PlayerStats, ServerResponse,
+    Hand,
 };
+use crate::betting::{BettingRound, BettingState}; 
+use crate::player::Player;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use rocket::{get, post, State};
 use rocket::serde::json::Json;
 
+use storage::entities::user_account::Model;
 use storage::DatabaseConnection; 
+use storage::repository::Repository;
 
 use crate::game::{FiveCardDraw, SevenCardStud, TexasHoldEm};
-use crate::player::Player;
 
 // ============================================================================
 // House Structure
@@ -29,12 +33,14 @@ use crate::player::Player;
 #[derive(Debug)]
 pub struct House {
     pub live_games: Arc<Mutex<HashMap<String, Game>>>,
+    pub hands: Arc<Mutex<HashMap<String, Hand>>>, 
 }
 
 impl House {
     pub fn new() -> Self {
         Self {
             live_games: Arc::new(Mutex::new(HashMap::new())),
+            hands: Arc::new(Mutex::new(HashMap::new())), 
         }
     }
 
@@ -115,6 +121,13 @@ impl House {
         }
     }
 
+    /// Helper method to remove an empty game. 
+    ///
+    /// Parameters: 
+    ///     game_id   - The game to remove from the house 
+    ///
+    /// Returns: 
+    ///     Result<(), String>
     pub fn remove_game(&self, game_id: &str) -> Result<(), String> { 
         let mut games = self.live_games.lock().unwrap(); 
         games.remove(game_id).ok_or(format!("Failed to remove game: {}", game_id))?;
@@ -134,7 +147,6 @@ impl House {
         match games.get_mut(game_id) {
             Some(game) => {
                 game.remove_player(player_id)?;
-                // TODO: If game is empty, consider removing it from live_games
                 if game.is_empty() { self.remove_game(game_id); }
                 Ok(()) 
             },
@@ -235,13 +247,18 @@ pub async fn list_games(house: &State<House>) -> Json<GameListResponse> {
 pub async fn create_game(
     request: Json<CreateGameRequest>,
     house: &State<House>,
-    db: &State<DatabaseConnection>
 ) -> Json<GameResponse> {
     let inner_request = request.into_inner();
+    let player_id = Uuid::parse_str(&inner_request.player_id).unwrap();  
+    let repo: Repository = Repository::new()
+        .await
+        .expect("Failed to create new repository");
+    
+    let model = repo.get_user_by_id(player_id)
+        .await
+        .expect("Failed to get user");
 
-    // TODO: Fetch player from database to get their chip balance
-    // For now, create player with default starting chips
-    let player = Player::new(inner_request.username.clone(), 500);
+    let player = model_to_player(&model); 
 
     let mut new_game = match house.create_new_game(inner_request.game_type) {
         Ok(game) => game,
@@ -255,7 +272,10 @@ pub async fn create_game(
             let mut games = house.live_games.lock().unwrap();
             games.insert(game_id.clone(), new_game);
 
+            let mut hands = house.hands.lock().unwrap(); 
+            hands.insert(player_id.to_string(), player.hand.clone()); 
             // TODO: Build proper GameStateUpdate from game state
+            
             let message = format!("Game created successfully. Waiting for players in game {}", game_id);
             Json(GameResponse {
                 success: true,
@@ -412,20 +432,27 @@ pub async fn register_viewer(
 /// that can be sent to clients.
 ///
 /// TODO: Implement proper conversion logic
-fn build_game_state_update(game: &Game, _player_id: Option<&str>) -> GameStateUpdate {
-    // Placeholder implementation
+async fn build_game_state_update(game: &Game, player_id: Option<&str>, house: &State<House>) -> GameStateUpdate {
+    
+    let mut player_info_list : Vec<Player> = game.iter_mut()
+                                                 .map(|player| player_to_info(player, false))
+                                                 .collect(); 
+
+    if let Some(val) = player_id { 
+        let player = get_player(player_id.expect("value"), house); 
+    }
     GameStateUpdate {
         game_id: game.get_game_id().to_string(),
         game_type: game.get_game_type(),
         pot: game.get_pot(),
-        current_bet: 0, // TODO: Get from game state
-        betting_round: poker_core::BettingRound::PreDraw, // TODO: Get from game state
-        action_on: None, // TODO: Get from game state
+        current_bet: game.get_betting_state(),  
+        betting_round: game.get_betting_round(), 
+        action_on: game.get_action_on(), 
         player_count: game.get_player_count(),
-        players: vec![], // TODO: Build player info list
+        players: player_info_list, 
         community_cards: vec![], // TODO: For Texas Hold'em
-        your_hand: vec![], // TODO: Get player's hand if player_id provided
-        your_chips: 0, // TODO: Get player's chips
+        your_hand: vec![], 
+        your_chips: player.chips,
     }
 }
 
@@ -441,6 +468,69 @@ fn player_to_info(player: &Player, is_dealer: bool) -> PlayerInfo {
         is_dealer,
         cards_count: player.hand.len(),
     }
+}
+
+/// Converts a Model to a Player for protocol communication. 
+fn model_to_player(model: &Model) -> Player { 
+    let token_balance = match model.token_balance { 
+        Some(val) => val as u32, 
+        None => 0, 
+    }; 
+    Player { 
+        id: model.id.clone(), 
+        username: model.username.clone(),  
+        chips: token_balance,
+        hand: Hand::new(), 
+        current_bet: 0, 
+        is_folded: false, 
+        game_id:  model.game_id.clone(),
+    }
+}
+
+/// Gets a user account model from the database and converts it to a player 
+/// for protocol communication. 
+async fn get_player_from_db(player_id: &str) -> Player { 
+    let player_id = Uuid::parse_str(player_id).unwrap();  
+    let repo: Repository = Repository::new()
+        .await
+        .expect("Failed to create new repository");
+    
+    let model = repo.get_user_by_id(player_id)
+        .await
+        .expect("Failed to get user");
+
+    model_to_player(&model)
+}
+
+/// Gets the specified player from their current game 
+///
+/// TODO 
+async fn get_player(player_id: &str, house: &State<House>) -> Option<Player> { 
+    let live_games = &house.live_games
+                        .clone()
+                        .lock()
+                        .unwrap(); 
+
+    
+    for (id, game) in live_games.iter_mut() { 
+        match check_player_in_game(player_id.clone(), game.clone()).await  {
+            Some(val) => { 
+                return &val
+            }, 
+            _ => return ()
+        }
+    }
+
+    hand
+    //TODO consider adding more game data to database for phase 2}
+}
+/// Checks if player is in the given game 
+///
+/// Returns:
+///     That player if yes, nothing otherwise
+async fn check_player_in_game(player_id: &str, game: Game) -> Option<Player>  { 
+    let players = game.get_players(); 
+    players.iter().cloned().find(|player| player.id.to_string() == player_id) 
 }
 
 // ============================================================================

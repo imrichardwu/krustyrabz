@@ -13,6 +13,7 @@ pub struct Model {
     pub rounds_played: Option<i32>,
     pub pots_won: Option<i32>,
     pub number_folds: Option<i32>,
+    pub game_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

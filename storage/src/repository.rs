@@ -39,6 +39,7 @@ pub async fn create_supabase_client() -> Result<SupabaseClient, Box<dyn std::err
     Ok(client)
 }
 
+
 /// Repository struct to hold both Supabase client and SeaORM database connection
 pub struct Repository {
     supabase_client: SupabaseClient,
@@ -99,6 +100,7 @@ impl Repository {
             rounds_played: Set(Some(0)),
             pots_won: Set(Some(0)),
             number_folds: Set(Some(0)),
+            game_id: Set(None),
             id: Set(id),
         };
 

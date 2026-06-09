@@ -14,8 +14,10 @@ pub mod player;
 pub mod table;
 
 use house::House;
-use storage::establish_connection;
-use tokio::runtime::Runtime; 
+use storage::establish_connection; 
+use storage::repository::create_supabase_client; 
+use tokio::runtime::Runtime;
+
 
 /// Launches the Rocket server with the House state and all routes mounted.
 #[launch]
@@ -29,11 +31,16 @@ fn rocket() -> _ {
     let db = rt
         .block_on(establish_connection())
         .expect("Failed to establish connection"); 
-    
+   
+    // We need to pass a supabase connection as managed state 
+    let client = rt
+        .block_on(create_supabase_client())
+        .expect("Failed to create client"); 
 
     rocket::build()
         .manage(House::new())
         .manage(db)
+        .manage(client) 
         .mount(
             "/",
             routes![

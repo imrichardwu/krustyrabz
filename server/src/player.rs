@@ -61,6 +61,7 @@ pub struct Player {
     #[serde(skip, default)]
     pub hand: Hand,
     pub is_folded: bool,
+    pub game_id: Option<Uuid>, 
     pub current_bet: u32,
 }
 
@@ -71,6 +72,7 @@ impl Player {
             username,
             chips: starting_chips,
             hand: Hand::new(),
+            game_id: Option<Uuid>, 
             is_folded: false,
             current_bet: 0,
         }

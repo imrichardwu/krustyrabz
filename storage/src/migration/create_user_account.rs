@@ -28,6 +28,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(UserAccount::RoundsPlayed).integer())
                     .col(ColumnDef::new(UserAccount::PotsWon).integer())
                     .col(ColumnDef::new(UserAccount::NumberFolds).integer())
+                    .col(ColumnDef::new(UserAccount::GameId).uuid())
                     .to_owned(),
             )
             .await?;
@@ -52,4 +53,5 @@ enum UserAccount {
     RoundsPlayed,
     PotsWon,
     NumberFolds,
+    GameId,
 }

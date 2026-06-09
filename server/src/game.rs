@@ -327,7 +327,49 @@ impl Game {
             Game::TexasHoldEm(game) => game.core.table.get_player_count(),
         }
     }
+    pub fn get_players(&self) -> Vec<Player> { 
+        match self { 
+            Game::FiveCardDraw(game) => 
+                game.core.table.players.clone(), 
+            Game::SevenCardStud(game) => 
+                game.core.table.players.clone(), 
+            Game::TexasHoldEm(game) => 
+                game.core.table.players.clone(), 
+        }
+    }
 
+    pub fn get_betting_state(&self) -> BettingState {
+        match self { 
+            Game::FiveCardDraw(game) => 
+                game.core.betting_state.clone(), 
+            Game::SevenCardStud(game) => 
+                game.core.betting_state.clone(), 
+            Game::TexasHoldEm(game) => 
+                game.core.betting_state.clone(), 
+        }
+    }
+
+    pub fn get_betting_round(&self) -> BettingRound {
+        match self { 
+            Game::FiveCardDraw(game) => 
+                game.betting_round.clone(), 
+            Game::SevenCardStud(game) => 
+                game.betting_round.clone(), 
+            Game::TexasHoldEm(game) => 
+                game.core.betting_round.clone(), 
+        }
+    }
+
+    pub fn get_action_on(&self) -> Option<Uuid> { 
+        match self { 
+            Game::FiveCardDraw(game) => 
+                game.core.action_on.clone(), 
+            Game::SevenCardStud(game) => 
+                game.core.action_on.clone(), 
+            Game::TexasHoldEm(game) => 
+                game.core.action_on.clone(), 
+        }
+    }
     pub fn get_max_players(&self) -> usize {
         match self {
             Game::FiveCardDraw(game) => game.core.table.max_players,
@@ -439,10 +481,6 @@ impl FiveCardDraw {
             core: SharedGameState::new(5),
             betting_round: BettingRound::PreDeal,
         }
-    }
-
-    pub fn get_id(&self) -> String { 
-        self.game_id.to_string()
     }
 
     pub fn predraw_betting(
