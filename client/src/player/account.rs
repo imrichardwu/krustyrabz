@@ -2,6 +2,7 @@ use std::time::SystemTime;
 
 /// Represents a player's account information
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PlayerAccount {
     pub username: String,
     pub email: Option<String>,

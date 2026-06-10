@@ -113,13 +113,18 @@ impl Repository {
 
     /// Get a user account by id (Supabase Auth id).
     pub async fn get_user_by_id(&self, id: Uuid) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
-        UserAccount::find_by_id(id)
-            .one(&self.db)
-            .await
-            .map_err(|e| -> Box<dyn std::error::Error> { Box::from(e) })?
-            .ok_or_else(|| -> Box<dyn std::error::Error> {
-                Box::from(sea_orm::DbErr::RecordNotFound(format!("User with id '{}' not found", id)))
-            })
+        match UserAccount::find_by_id(id).one(&self.db).await {
+            Ok(Some(model)) => Ok(model),
+            Ok(None) => {
+                Err(Box::from(sea_orm::DbErr::RecordNotFound(format!(
+                    "User with id '{}' not found",
+                    id
+                ))))
+            }
+            Err(entity_err) => {
+                Err(Box::from(entity_err))
+            }
+        }
     }
 
     //pass negative to decrease and positive to increase

@@ -15,7 +15,7 @@ use crate::player::Player;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use rocket::{get, post, State};
-use rocket::serde::json::Json;
+use rocket::serde::{json::Json, Deserialize};
 
 use storage::entities::user_account::Model;
 use storage::repository::Repository;
@@ -194,6 +194,13 @@ impl Default for House {
     }
 }
 
+/// Request body for starting a hand (Five Card Draw).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(crate = "rocket::serde")]
+pub struct StartHandRequest {
+    pub player_id: String,
+}
+
 // ============================================================================
 // HTTP Route Handlers
 // ============================================================================
@@ -253,16 +260,22 @@ pub async fn create_game(
     house: &State<House>,
 ) -> Json<GameResponse> {
     let inner_request = request.into_inner();
-    let player_id = Uuid::parse_str(&inner_request.player_id).unwrap();  
-    let repo: Repository = Repository::new()
-        .await
-        .expect("Failed to create new repository");
-    
-    let model = repo.get_user_by_id(player_id)
-        .await
-        .expect("Failed to get user");
+    let player_id = match Uuid::parse_str(&inner_request.player_id) {
+        Ok(id) => id,
+        Err(_) => return Json(GameResponse::error("Invalid player_id".to_string())),
+    };
 
-    let player = model_to_player(&model); 
+    let repo = match Repository::new().await {
+        Ok(r) => r,
+        Err(e) => return Json(GameResponse::error(format!("Failed to create repository: {}", e))),
+    };
+
+    let model = match repo.get_user_by_id(player_id).await {
+        Ok(m) => m,
+        Err(e) => return Json(GameResponse::error(format!("User not found: {}", e))),
+    };
+
+    let player = model_to_player(&model);
 
     let mut new_game = match house.create_new_game(inner_request.game_type) {
         Ok(game) => game,
@@ -276,20 +289,22 @@ pub async fn create_game(
             let mut games = house.live_games.lock().unwrap();
             games.insert(game_id.clone(), new_game);
 
-            
             // Initialize an entry for this player's hand in the House cache.
-            // At game creation time the hand is empty; it will be updated later
-            // when cards are dealt.
             let mut hands = house.hands.lock().unwrap();
             hands.insert(player_id.to_string(), Hand::new());
-            // TODO: Build proper GameStateUpdate from game state
-            
-            let message = format!("Game created successfully. Waiting for players in game {}", game_id);
+
+            let game = games.get(&game_id).expect("just inserted");
+            let state = build_game_state_update(game, Some(&inner_request.player_id));
+
+            let message = format!(
+                "Game created successfully. Waiting for players in game {}",
+                game_id
+            );
             Json(GameResponse {
                 success: true,
                 message,
                 game_id: Some(game_id),
-                game_state: None, // TODO: Add game state
+                game_state: Some(state),
             })
         }
         Err(e) => Json(GameResponse::error(format!("Failed to add player to game: {}", e))),
@@ -310,23 +325,72 @@ pub async fn join_game(
 ) -> Json<GameResponse> {
     let inner_request = request.into_inner();
 
-    // TODO: Fetch player from database to get their chip balance
-    let player = Player::new(inner_request.username.clone(), 500);
+    let player = match get_player_from_db(&inner_request.player_id).await {
+        Ok(p) => p,
+        Err(e) => return Json(GameResponse::error(format!("Failed to load player: {}", e))),
+    };
 
     let result = house.lock_and_add(player, None, Some(game_id.clone()));
 
     match result {
         Ok(joined_game_id) => {
+            let games = house.live_games.lock().unwrap();
+            let game = match games.get(&joined_game_id) {
+                Some(g) => g,
+                None => {
+                    return Json(GameResponse::error("Game not found after join".to_string()));
+                }
+            };
+            let state = build_game_state_update(game, Some(&inner_request.player_id));
             let message = format!("Successfully joined game {}", joined_game_id);
-            // TODO: Build proper GameStateUpdate from game state
             Json(GameResponse {
                 success: true,
                 message,
                 game_id: Some(joined_game_id),
-                game_state: None, // TODO: Add game state
+                game_state: Some(state),
             })
         }
         Err(e) => Json(GameResponse::error(format!("Failed to join game: {}", e))),
+    }
+}
+
+/// Starts a hand (Five Card Draw only). Deals 5 cards to each player and transitions to PreDraw betting.
+///
+/// Request body: `{ "player_id": "..." }` (player must be in the game).
+#[post("/games/<game_id>/start", format = "json", data = "<request>")]
+pub async fn start_hand(
+    game_id: String,
+    request: Json<StartHandRequest>,
+    house: &State<House>,
+) -> Json<GameResponse> {
+    let player_id_str = request.player_id.clone();
+    let _player_id = match Uuid::parse_str(&player_id_str) {
+        Ok(id) => id,
+        Err(_) => return Json(GameResponse::error("Invalid player_id".to_string())),
+    };
+
+    let mut games = house.live_games.lock().unwrap();
+    let game = match games.get_mut(&game_id) {
+        Some(g) => g,
+        None => return Json(GameResponse::error("Game not found".to_string())),
+    };
+
+    if game.get_game_type() != GameType::FiveCardDraw {
+        return Json(GameResponse::error(
+            "Only Five Card Draw supports start_hand".to_string(),
+        ));
+    }
+
+    match game.start_hand() {
+        Ok(()) => {
+            let state = build_game_state_update(game, Some(&player_id_str));
+            Json(GameResponse::success(
+                "Hand started".to_string(),
+                game_id,
+                state,
+            ))
+        }
+        Err(e) => Json(GameResponse::error(e)),
     }
 }
 
@@ -343,8 +407,6 @@ pub async fn get_game(
     let games = house.live_games.lock().unwrap();
 
     games.get(&game_id).map(|game| {
-        // TODO: Build proper GameStateUpdate from game state
-        // This should include player-specific information like their hand
         let state = build_game_state_update(game, Some(&player_id));
         Json(state)
     })
@@ -412,20 +474,66 @@ pub async fn perform_action(
 }
 
 /// Returns statistics for a specific player.
-///
-/// TODO: This should query the database for player stats
 #[get("/players/<player_id>/stats")]
 pub async fn get_stats(player_id: String) -> Json<PlayerStats> {
-    // TODO: Query database for player stats
-    // Placeholder response
+    let player_uuid = match Uuid::parse_str(&player_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return Json(poker_core::PlayerStats {
+                player_id,
+                username: "Unknown".to_string(),
+                rounds_played: 0,
+                pots_won: 0,
+                folds: 0,
+                total_winnings: 0,
+                current_balance: 0,
+            });
+        }
+    };
+
+    let repo = match Repository::new().await {
+        Ok(r) => r,
+        Err(_) => {
+            return Json(poker_core::PlayerStats {
+                player_id,
+                username: "Unknown".to_string(),
+                rounds_played: 0,
+                pots_won: 0,
+                folds: 0,
+                total_winnings: 0,
+                current_balance: 0,
+            });
+        }
+    };
+
+    let model = match repo.get_user_by_id(player_uuid).await {
+        Ok(m) => m,
+        Err(_) => {
+            return Json(poker_core::PlayerStats {
+                player_id,
+                username: "Unknown".to_string(),
+                rounds_played: 0,
+                pots_won: 0,
+                folds: 0,
+                total_winnings: 0,
+                current_balance: 0,
+            });
+        }
+    };
+
+    let rounds_played = model.rounds_played.unwrap_or(0) as u32;
+    let pots_won = model.pots_won.unwrap_or(0) as u32;
+    let folds = model.number_folds.unwrap_or(0) as u32;
+    let current_balance = model.token_balance.unwrap_or(0.0) as u32;
+
     Json(poker_core::PlayerStats {
         player_id,
-        username: "Unknown".to_string(),
-        rounds_played: 0,
-        pots_won: 0,
-        folds: 0,
-        total_winnings: 0,
-        current_balance: 0,
+        username: model.username,
+        rounds_played,
+        pots_won,
+        folds,
+        total_winnings: 0, // not stored in UserAccount
+        current_balance,
     })
 }
 
@@ -438,36 +546,83 @@ pub async fn get_stats(player_id: String) -> Json<PlayerStats> {
 ///     - player_id: String
 ///     - num_chips: u32
 ///     - credit_limit: u32
-#[post("/players/<player_id>/addchips", format = "json", data = "<_request>")]
+#[post("/players/<player_id>/addchips", format = "json", data = "<request>")]
 pub async fn add_chips(
     player_id: String,
-    _request: Json<AddChipsRequest>,
+    request: Json<AddChipsRequest>,
 ) -> Json<AddChipsResponse> {
+    let player_uuid = match Uuid::parse_str(&player_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return Json(AddChipsResponse::error(
+                "Invalid player_id",
+                Uuid::nil(),
+                65535,
+            ));
+        }
+    };
 
-    // TODO: Parse player_id String to Uuid
-    // TODO: Fetch user from database
-    // TODO: Validate credit limit
-    // TODO: Update token balance
+    let num_chips = request.num_chips;
+    let credit_limit = request.credit_limit;
 
-    // Placeholder implementation
-    let player_uuid = Uuid::parse_str(&player_id).unwrap_or_default();
-    Json(AddChipsResponse::error(
-        "Add chips not yet implemented",
-        player_uuid,
-        65535,
-    ))
+    let repo = match Repository::new().await {
+        Ok(r) => r,
+        Err(e) => {
+            return Json(AddChipsResponse::error(
+                format!("Failed to create repository: {}", e),
+                player_uuid,
+                credit_limit,
+            ));
+        }
+    };
+
+    let model = match repo.get_user_by_id(player_uuid).await {
+        Ok(m) => m,
+        Err(e) => {
+            return Json(AddChipsResponse::error(
+                format!("User not found: {}", e),
+                player_uuid,
+                credit_limit,
+            ));
+        }
+    };
+
+    let current_balance = model.token_balance.unwrap_or(0.0) as u32;
+    if current_balance + num_chips > credit_limit {
+        return Json(AddChipsResponse::error(
+            "Would exceed credit limit",
+            player_uuid,
+            credit_limit,
+        ));
+    }
+
+    match repo
+        .update_user_token_balance(player_uuid, num_chips as f64)
+        .await
+    {
+        Ok(_) => Json(AddChipsResponse::success(
+            "Chips added",
+            player_uuid,
+            credit_limit,
+            num_chips,
+        )),
+        Err(e) => Json(AddChipsResponse::error(
+            format!("Failed to update balance: {}", e),
+            player_uuid,
+            credit_limit,
+        )),
+    }
 }
 
 /// Registers a viewer for a game.
 ///
-/// TODO: Decide if we need to register viewers or just send them game state updates
+/// Minimal implementation: returns success without persisting (for five-card testing).
 #[post("/games/<_game_id>/viewers", format = "json", data = "<_request>")]
 pub async fn register_viewer(
     _game_id: String,
     _request: Json<poker_core::ViewerRequest>,
 ) -> Json<ServerResponse> {
-    // TODO: Implement viewer registration
-    Json(ServerResponse::error("Viewer registration not yet implemented"))
+    Json(ServerResponse::success("Viewer registered"))
 }
 
 // ============================================================================
@@ -478,8 +633,9 @@ pub async fn register_viewer(
 fn to_protocol_betting_round(r: ServerBettingRound) -> poker_core::BettingRound {
     use poker_core::BettingRound as CoreRound;
     match r {
-        ServerBettingRound::PreDeal | ServerBettingRound::Drawing => CoreRound::PreDraw,
+        ServerBettingRound::PreDeal => CoreRound::PreDraw, // client shows PreDraw until hand starts
         ServerBettingRound::PreDraw => CoreRound::PreDraw,
+        ServerBettingRound::Drawing => CoreRound::Drawing,
         ServerBettingRound::PostDraw => CoreRound::PostDraw,
         _ => CoreRound::PreDraw,
     }
@@ -522,18 +678,38 @@ fn build_game_state_update(game: &Game, player_id: Option<&str>) -> GameStateUpd
         None => (Vec::new(), 0),
     };
 
+    let action_on_username = game
+        .get_action_on()
+        .and_then(|uid| players.iter().find(|p| p.id == uid))
+        .map(|p| p.username.clone());
+
+    let last_hand_message = game.get_last_showdown().map(|winners| {
+        if winners.is_empty() {
+            "Hand over (no winners).".to_string()
+        } else if winners.len() == 1 {
+            format!("*** SHOWDOWN: {} won ${} ***", winners[0].0, winners[0].1)
+        } else {
+            let parts: Vec<String> = winners
+                .iter()
+                .map(|(name, amt)| format!("{} won ${}", name, amt))
+                .collect();
+            format!("*** SHOWDOWN (tie): {} ***", parts.join(", "))
+        }
+    });
+
     GameStateUpdate {
         game_id: game.get_game_id().to_string(),
         game_type: game.get_game_type(),
         pot: game.get_pot(),
         current_bet: betting_state.to_call,
         betting_round: to_protocol_betting_round(game.get_betting_round()),
-        action_on: game.get_action_on().map(|u| u.to_string()),
+        action_on: action_on_username,
         player_count: game.get_player_count(),
         players: players_info,
         community_cards: Vec::new(),
         your_hand,
         your_chips,
+        last_hand_message,
     }
 }
 
@@ -589,6 +765,7 @@ async fn get_player_from_db(player_id: &str) -> Result<Player, String> {
 /// Gets the specified player from their current in-memory game, if any.
 ///
 /// Iterates over all live games in the `House` and returns the first matching player.
+#[allow(dead_code)]
 async fn get_player(player_id: &str, house: &State<House>) -> Option<Player> {
     let games = house.live_games.lock().unwrap();
 
@@ -602,6 +779,7 @@ async fn get_player(player_id: &str, house: &State<House>) -> Option<Player> {
 }
 
 /// Checks if a player is in the given game and returns them if found.
+#[allow(dead_code)]
 fn find_player_in_game(player_id: &str, game: &Game) -> Option<Player> {
     game.get_players()
         .into_iter()

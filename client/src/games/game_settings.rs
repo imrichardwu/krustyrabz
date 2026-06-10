@@ -9,20 +9,19 @@ use crate::authentication::AuthSession;
 use poker_core::{BettingRound, GameStateUpdate, GameStatus, GameType};
 use client::read_input;
 
-/// Create a new game and enter the game loop.
+/// Create a new game and enter the game loop. Only Five Card Draw is supported.
 pub async fn create_and_play_game(
     client: &PokerClient,
     session: &AuthSession,
     game_type: GameType,
 ) -> Result<(), ApiError> {
-    let game_name = match game_type {
-        GameType::FiveCardDraw => "Five Card Draw",
-        // GameType::SevenCardStud => "Seven Card Stud",
-        // GameType::TexasHoldEm => "Texas Hold'em",
-        _ => "Unknown Game Type",
-    };
-    
-    println!("\nCreating new {} game...", game_name);
+    if game_type != GameType::FiveCardDraw {
+        return Err(ApiError::Server(
+            "Only Five Card Draw is supported for now.".to_string(),
+        ));
+    }
+
+    println!("\nCreating new Five Card Draw game...");
 
     let response = client
         .create_game(&session.user_id, &session.username, game_type)
@@ -39,13 +38,16 @@ pub async fn create_and_play_game(
     game_loop(client, session, &game_id, game_type).await
 }
 
-/// Join an existing game and enter the game loop.
+/// Join an existing game and enter the game loop. Only Five Card Draw is fully supported.
 pub async fn join_and_play_game(
     client: &PokerClient,
     session: &AuthSession,
     game_id: &str,
     game_type: GameType,
 ) -> Result<(), ApiError> {
+    if game_type != GameType::FiveCardDraw {
+        println!("Note: Only Five Card Draw actions are supported; you may see errors for other game types.");
+    }
     println!("\nJoining game {}...", game_id);
 
     let response = client
@@ -62,6 +64,7 @@ pub async fn join_and_play_game(
 }
 
 /// List all available games.
+#[allow(dead_code)]
 pub async fn list_games(client: &PokerClient) -> Result<(), ApiError> {
     let response = client.list_games().await?;
 
@@ -112,17 +115,31 @@ pub async fn game_loop(
             break;
         }
 
-        // Show action menu
+        // Show action menu (only offer actions that are valid this turn/phase)
+        let is_betting_phase = matches!(
+            state.betting_round,
+            BettingRound::PreDraw | BettingRound::PostDraw
+        );
+        let is_draw_phase = state.betting_round == BettingRound::Drawing;
+        let is_my_turn = state.action_on.as_deref() == Some(session.username.as_str());
+
         println!("\n=== Actions ===");
+        let can_start_hand = has_draw_phase && state.your_hand.is_empty() && state.player_count >= 2;
+        if can_start_hand {
+            println!("9. Start hand (deal cards, need 2+ players)");
+        }
         println!("1. Refresh Game State");
-        println!("2. Fold");
-        println!("3. Check");
-        println!("4. Call");
-        println!("5. Bet");
-        println!("6. Raise");
-        
+        if is_betting_phase && is_my_turn {
+            println!("2. Fold");
+            println!("3. Check");
+            println!("4. Call");
+            println!("5. Bet");
+            println!("6. Raise");
+        }
         if has_draw_phase {
-            println!("7. Draw Cards (discard and draw new)");
+            if is_draw_phase && is_my_turn {
+                println!("7. Draw Cards (discard and draw new)");
+            }
             println!("8. Leave Game");
         } else {
             println!("7. Leave Game");
@@ -131,14 +148,15 @@ pub async fn game_loop(
         let choice = read_input("Choice: ");
 
         let result = match choice.trim() {
+            "9" if can_start_hand => client.start_hand(game_id, &session.user_id).await,
             "1" => {
                 println!("Refreshing...");
                 continue;
             }
-            "2" => client.fold(&session.user_id, game_id).await,
-            "3" => client.check(&session.user_id, game_id).await,
-            "4" => client.call(&session.user_id, game_id).await,
-            "5" => {
+            "2" if is_betting_phase && is_my_turn => client.fold(&session.user_id, game_id).await,
+            "3" if is_betting_phase && is_my_turn => client.check(&session.user_id, game_id).await,
+            "4" if is_betting_phase && is_my_turn => client.call(&session.user_id, game_id).await,
+            "5" if is_betting_phase && is_my_turn => {
                 let amount = read_input("Enter bet amount: ");
                 match amount.trim().parse::<u32>() {
                     Ok(amt) => client.bet(&session.user_id, game_id, amt).await,
@@ -148,7 +166,7 @@ pub async fn game_loop(
                     }
                 }
             }
-            "6" => {
+            "6" if is_betting_phase && is_my_turn => {
                 let amount = read_input("Enter raise amount: ");
                 match amount.trim().parse::<u32>() {
                     Ok(amt) => client.raise(&session.user_id, game_id, amt).await,
@@ -158,41 +176,40 @@ pub async fn game_loop(
                     }
                 }
             }
-            "7" => {
-                if has_draw_phase {
-                    println!("Enter card positions to discard (1-5), separated by spaces.");
-                    println!("Example: '1 3 5' discards cards 1, 3, and 5");
-                    let input = read_input("Discard: ");
-                    let indices: Vec<usize> = input
-                        .trim()
-                        .split_whitespace()
-                        .filter_map(|s| s.parse::<usize>().ok())
-                        .filter(|&n| n >= 1 && n <= 5)
-                        .map(|n| n - 1) // Convert to 0-indexed
-                        .collect();
+            "7" if has_draw_phase && is_draw_phase && is_my_turn => {
+                println!("Enter card positions to discard (1-5), separated by spaces (max 3).");
+                println!("Example: '1 3 5' discards cards 1, 3, and 5. Enter 0 or leave empty to keep all cards (stand pat).");
+                let input = read_input("Discard: ");
+                let indices: Vec<usize> = input
+                    .trim()
+                    .split_whitespace()
+                    .filter_map(|s| s.parse::<usize>().ok())
+                    .filter(|&n| n >= 1 && n <= 5)
+                    .map(|n| n - 1) // Convert to 0-indexed
+                    .collect();
 
-                    if indices.len() > 3 {
-                        println!("You can only discard up to 3 cards!");
-                        continue;
-                    }
-
-                    client.draw(&session.user_id, game_id, indices).await
-                } else {
-                    println!("Leaving game...");
-                    break;
-                }
-            }
-            "8" => {
-                if has_draw_phase {
-                    println!("Leaving game...");
-                    break;
-                } else {
-                    println!("Invalid choice");
+                if indices.len() > 3 {
+                    println!("You can only discard up to 3 cards!");
                     continue;
                 }
+
+                client.draw(&session.user_id, game_id, indices).await
+            }
+            "8" if has_draw_phase => {
+                println!("Leaving game...");
+                break;
+            }
+            "7" if has_draw_phase => {
+                // Draw phase but not your turn, or not in draw phase
+                println!("Invalid choice (Draw only when it's your turn in Drawing phase)");
+                continue;
+            }
+            "7" => {
+                println!("Leaving game...");
+                break;
             }
             _ => {
-                println!("Invalid choice");
+                println!("Invalid choice (use 1 to refresh; betting/draw only when it's your turn)");
                 continue;
             }
         };
@@ -217,6 +234,9 @@ pub async fn game_loop(
 
 /// Display the current game state.
 pub fn display_game_state(state: &GameStateUpdate, _my_player_id: &str) {
+    if let Some(ref msg) = state.last_hand_message {
+        println!("\n{}", msg);
+    }
     println!("\n{}", "=".repeat(60));
     println!("  GAME: {} | POT: ${}", state.game_id, state.pot);
     println!("  Round: {} | Current Bet: ${}", state.betting_round, state.current_bet);

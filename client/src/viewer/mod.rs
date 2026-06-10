@@ -6,9 +6,8 @@
 // - Viewer can refresh to see updates and leave when done.
 
 use crate::api::PokerClient;
-use crate::api::client::ApiError;
 use crate::authentication::AuthSession;
-use poker_core::{GameStateUpdate, GameStatus, GameType};
+use poker_core::{GameStateUpdate, GameStatus};
 use client::read_input;
 
 /// Watch a game (read-only). Register as viewer, then poll and display public state.

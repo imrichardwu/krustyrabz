@@ -83,17 +83,23 @@ async fn list_and_join_games(client: &PokerClient, session: &AuthSession) {
 
 async fn create_new_game(client: &PokerClient, session: &AuthSession) {
     println!("\n=== Create New Game ===");
-    println!("1. Five Card Draw");
-    println!("2. Seven Card Stud");
-    println!("3. Texas Hold'em");
+    println!("1. Five Card Draw (supported)");
+    println!("2. Seven Card Stud (not yet supported)");
+    println!("3. Texas Hold'em (not yet supported)");
     println!("4. Back to Main Menu");
     
     let choice = read_input("Choose game type: ");
     
     let game_type = match choice.trim() {
         "1" => GameType::FiveCardDraw,
-        "2" => GameType::SevenCardStud,
-        "3" => GameType::TexasHoldEm,
+        "2" => {
+            println!("Only Five Card Draw is supported for now.");
+            return;
+        }
+        "3" => {
+            println!("Only Five Card Draw is supported for now.");
+            return;
+        }
         "4" => {
             println!("Returning to main menu...");
             return;
@@ -177,13 +183,23 @@ async fn main() {
                 "3" => watch_game(&client, session.as_ref().unwrap()).await,
                 "4" => {
                     println!("Enter amount of chips to add: ");
-                    let amount = read_input("Amount: ");
-                    let amount = amount.trim().parse::<u32>().unwrap();
-                    let response = client.add_chips(&session.as_ref().unwrap().user_id, amount).await;
-                    if response.is_ok() {
-                        println!("Chips added successfully.");
-                    } else {
-                        println!("Error adding chips: {}", response.err().unwrap());
+                    let amount_str = read_input("Amount: ");
+                    let amount = match amount_str.trim().parse::<u32>() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            println!("Invalid amount. Enter a number.");
+                            continue;
+                        }
+                    };
+                    match client.add_chips(&session.as_ref().unwrap().user_id, amount).await {
+                        Ok(resp) => {
+                            if resp.success {
+                                println!("{} (chips added: {})", resp.message, resp.chips_added);
+                            } else {
+                                println!("Error: {}", resp.message);
+                            }
+                        }
+                        Err(e) => println!("Error adding chips: {}", e),
                     }
                     continue;
                 }

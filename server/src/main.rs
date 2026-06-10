@@ -48,6 +48,7 @@ fn rocket() -> _ {
                 house::list_games,
                 house::create_game,
                 house::join_game,
+                house::start_hand,
                 house::get_game,
                 house::perform_action,
                 house::get_stats,

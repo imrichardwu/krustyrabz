@@ -1,4 +1,4 @@
-use crate::card::{Card, Rank, Suit};
+use crate::card::{Card, Rank};
 use arrayvec::ArrayVec;
 use std::cmp::Ordering;
 
@@ -80,16 +80,16 @@ impl Hand {
     fn analyze_hand(&self, cards: &[Card]) -> ([u8; 13], bool, u16) {
         let mut counts = [0u8; 13];
 
-        if self.cards.is_empty() {
+        if cards.is_empty() {
             return (counts, false, 0);
         }
 
         let mut is_flush = true;
-        let first_suit = self.cards[0].suit;
+        let first_suit = cards[0].suit;
         let mut rank_mask = 0u16;
 
         // Note: Rank::Two = 2, so index = rank as usize - 2
-        for elem in &self.cards {
+        for elem in cards {
             let index = elem.rank as usize - 2;
             counts[index] += 1;
             rank_mask |= 1 << index; // build bitmask
@@ -278,6 +278,7 @@ impl Default for Hand {
 mod tests {
     use super::*;
     use crate::card::CardType;
+    use crate::card::Suit;
 
     fn card(r: Rank, s: Suit) -> Card {
         Card::construct(r, s, CardType::Private)

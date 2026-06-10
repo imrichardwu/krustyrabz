@@ -5,8 +5,27 @@ use std::env;
 use storage::Repository;
 use uuid::Uuid;
 
+/// Load .env so DATABASE_URL is set for Repository (UserAccount table).
+/// Tries current dir, then parent (project root when run from client/ or IDE).
+fn ensure_dotenv_loaded() {
+    dotenv().ok();
+    if env::var("DATABASE_URL").is_ok() {
+        return;
+    }
+    if let Ok(cwd) = env::current_dir() {
+        for dir in [cwd.as_path(), cwd.join("..").as_path()] {
+            let env_path = dir.join(".env");
+            if env_path.exists() {
+                dotenv::from_path(&env_path).ok();
+                break;
+            }
+        }
+    }
+}
+
 /// Authentication session containing user info and access token
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AuthSession {
     pub access_token: String,
     pub refresh_token: String,
@@ -17,6 +36,7 @@ pub struct AuthSession {
 
 /// Supabase Auth API response structures
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct SignUpRequest {
     email: String,
     password: String,
@@ -45,6 +65,7 @@ struct UserInfo {
 
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct AuthError {
     message: String,
     error: Option<String>,
@@ -56,8 +77,8 @@ struct AuthError {
 /// - `Ok(AuthSession)` on success
 /// - `Err(String)` with error message on failure
 pub async fn register() -> Result<AuthSession, String> {
-    dotenv().ok();
-    
+    ensure_dotenv_loaded();
+
     // Get Supabase URL and anon key from environment
     let supabase_url = env::var("SUPABASE_URL")
         .map_err(|_| "SUPABASE_URL not found in .env file")?;
@@ -120,16 +141,16 @@ pub async fn register() -> Result<AuthSession, String> {
 
         let session_username = auth_response.user.user_metadata.and_then(|m| m.get("username").and_then(|v| v.as_str().map(|s| s.to_string()))) .unwrap_or_else(|| username.clone());
 
-        println!("User '{}' registered successfully!", session_username);
-
-        // create user in database (id from Supabase Auth; username must be unique)
+        // Create user in app database (UserAccount table) so the server can find you when creating/joining games
         let user_id = auth_response.user.id.parse::<Uuid>()
             .map_err(|_| "Invalid user id from Supabase Auth".to_string())?;
         let repository = Repository::new().await
-            .map_err(|e| format!("Failed to create repository: {}", e))?;
-        let _user = repository.create_user(session_username.clone(), user_id)
+            .map_err(|e| format!("Cannot connect to database. Set DATABASE_URL in .env (same as server). Error: {}", e))?;
+        repository.create_user(session_username.clone(), user_id)
             .await
-            .map_err(|e| format!("{}", e))?;
+            .map_err(|e| format!("User created in Supabase Auth but failed to create in app database (UserAccount). Run migrations: cargo run -p storage --bin migrate -- up. Error: {}", e))?;
+
+        println!("User '{}' registered successfully!", session_username);
 
         Ok(AuthSession {
             access_token,
@@ -222,14 +243,7 @@ async fn login_with_credentials(email: &str, password: &str) -> Result<AuthSessi
 /// - `Ok(AuthSession)` on success
 /// - `Err(String)` with error message on failure
 pub async fn login() -> Result<AuthSession, String> {
-    dotenv().ok();
-    
-    // Get Supabase URL and anon key from environment
-    let supabase_url = env::var("SUPABASE_URL")
-        .map_err(|_| "SUPABASE_URL not found in .env file")?;
-    
-    let supabase_key = env::var("SUPABASE_KEY")
-        .map_err(|_| "SUPABASE_KEY not found in .env file")?;
+    ensure_dotenv_loaded();
     
     // Get user input
     println!("Enter email:");
@@ -244,11 +258,22 @@ pub async fn login() -> Result<AuthSession, String> {
     
     // Use the helper function
     let session = login_with_credentials(&email, &password).await?;
+
+    // Ensure UserAccount row exists (so create_game / join_game can find the user)
+    if let Ok(user_uuid) = Uuid::parse_str(&session.user_id) {
+        if let Ok(repo) = Repository::new().await {
+            if repo.get_user_by_id(user_uuid).await.is_err() {
+                let _ = repo.create_user(session.username.clone(), user_uuid).await;
+            }
+        }
+    }
+
     println!("User '{}' logged in successfully!", session.username);
     Ok(session)
 }
 
 /// Verify if a session token is still valid
+#[allow(dead_code)]
 pub async fn verify_session(access_token: &str) -> Result<bool, String> {
     dotenv().ok();
     
@@ -273,6 +298,7 @@ pub async fn verify_session(access_token: &str) -> Result<bool, String> {
 }
 
 /// Refresh an access token using a refresh token
+#[allow(dead_code)]
 pub async fn refresh_token(refresh_token: &str) -> Result<AuthSession, String> {
     dotenv().ok();
     

@@ -5,6 +5,7 @@ pub use account::PlayerAccount;
 pub use statistics::PlayerStatistics;
 
 /// Represents the current player in the game
+#[allow(dead_code)]
 pub struct Player {
     pub account: PlayerAccount,
     pub statistics: PlayerStatistics,

@@ -158,6 +158,7 @@ pub struct GameStateUpdate {
     pub community_cards: Vec<String>,
     pub your_hand: Vec<String>,
     pub your_chips: u32,
+    pub last_hand_message: Option<String>,
 }
 
 /// Information about a player visible to others.
@@ -246,6 +247,7 @@ pub enum GameStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BettingRound {
     PreDraw,    // Five Card Draw
+    Drawing,    // Five Card Draw (discard/draw phase)
     PostDraw,   // Five Card Draw
     ThirdStreet,  // Seven Card Stud
     FourthStreet, // Seven Card Stud
@@ -262,6 +264,7 @@ impl std::fmt::Display for BettingRound {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BettingRound::PreDraw => write!(f, "Pre-Draw"),
+            BettingRound::Drawing => write!(f, "Drawing"),
             BettingRound::PostDraw => write!(f, "Post-Draw"),
             BettingRound::ThirdStreet => write!(f, "Third Street"),
             BettingRound::FourthStreet => write!(f, "Fourth Street"),
@@ -345,6 +348,7 @@ mod tests {
             community_cards: vec![],
             your_hand: vec!["A♠".to_string(), "K♥".to_string()],
             your_chips: 500,
+            last_hand_message: None,
         };
         let r = GameResponse::success("Joined", "game-1".to_string(), state);
         assert!(r.success);

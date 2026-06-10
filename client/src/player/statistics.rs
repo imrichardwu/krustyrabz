@@ -1,5 +1,6 @@
 /// Represents player statistics for tracking game performance
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PlayerStatistics {
     pub rounds_played: u32,
     pub games_won: u32,

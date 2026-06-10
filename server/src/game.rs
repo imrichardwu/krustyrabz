@@ -190,6 +190,11 @@ impl SharedGameState {
             return Ok(true);
         }
 
+        // Only one non-folded player left: round over (e.g. everyone else folded)
+        if self.count_active_players() == 1 {
+            return Ok(true);
+        }
+
         if let Some(aggressor) = was_aggressor {
             // Looped back to the raiser -> Round Over
             if self.action_on == Some(aggressor) {
@@ -405,6 +410,14 @@ impl Game {
         }
     }
 
+    /// Last hand result (winner names and amounts) for Five Card Draw; None for other variants or before any showdown.
+    pub fn get_last_showdown(&self) -> Option<Vec<(String, u32)>> {
+        match self {
+            Game::FiveCardDraw(game) => game.last_showdown.clone(),
+            _ => None,
+        }
+    }
+
     pub fn get_status(&self) -> GameStatus {
         match self {
             Game::FiveCardDraw(game) => {
@@ -491,6 +504,10 @@ pub struct FiveCardDraw {
     pub game_id: Uuid,
     pub core: SharedGameState,
     pub betting_round: BettingRound,
+    /// Winner username and amount won from last hand; cleared when next hand starts.
+    pub last_showdown: Option<Vec<(String, u32)>>,
+    /// Players who have already drawn this round (one draw per player per hand).
+    pub drawn_this_round: Vec<Uuid>,
 }
 
 impl FiveCardDraw {
@@ -499,6 +516,8 @@ impl FiveCardDraw {
             game_id: Uuid::new_v4(),
             core: SharedGameState::new(5),
             betting_round: BettingRound::PreDeal,
+            last_showdown: None,
+            drawn_this_round: Vec::new(),
         }
     }
 
@@ -510,6 +529,7 @@ impl FiveCardDraw {
         if self.core.table.players.len() < 2 {
             return Err("need_at_least_2_players".to_string());
         }
+        self.last_showdown = None; // clear previous hand result
         self.core.deck.shuffle();
         for player in &mut self.core.table.players {
             let cards = self.core.deck.deal(5);
@@ -569,6 +589,7 @@ impl FiveCardDraw {
         self.core.reset_current_bets();
         self.betting_round = BettingRound::Drawing;
         self.core.action_on = None;
+        self.drawn_this_round.clear();
 
         // pass true to include All-In players for card swap
         if !self.core.advance_action(true) {
@@ -590,11 +611,25 @@ impl FiveCardDraw {
 
     fn transition_to_showdown(&mut self) {
         self.core.reset_current_bets();
-        // self.betting_round = BettingRound::Showdown; 
-        //(TODO I am assuming we dont need to actually pause the game for it now in CLI, 
-        //will need to account for this in an actual UI)
 
-        let _results = self.core.resolve_showdown();
+        let results = self.core.resolve_showdown();
+        // Store winner names and amounts for client to show (before reset clears table state)
+        self.last_showdown = Some(
+            results
+                .iter()
+                .map(|(uid, amt)| {
+                    let name = self
+                        .core
+                        .table
+                        .players
+                        .iter()
+                        .find(|p| p.id == *uid)
+                        .map(|p| p.username.clone())
+                        .unwrap_or_else(|| uid.to_string());
+                    (name, *amt)
+                })
+                .collect(),
+        );
 
         self.core.reset_for_new_hand();
 
@@ -613,6 +648,10 @@ impl FiveCardDraw {
         if self.betting_round != BettingRound::Drawing {
             return Err("wrong_phase_expecting_drawing".to_string());
         }
+        // Five Card Draw: each player gets exactly one draw per hand
+        if self.drawn_this_round.contains(&player_id) {
+            return Err("already_drew_this_round".to_string());
+        }
 
         if discard_indices.len() > 5 {
             return Err("too_many_discards".to_string());
@@ -627,9 +666,30 @@ impl FiveCardDraw {
         let player = self.core.table.get_player_mut(player_id).unwrap();
         player.draw(&discard_indices, new_cards)?;
 
-        // pass true because the next person might be All-In
-        if !self.core.advance_action(true) {
-            self.transition_to_post_draw();
+        self.drawn_this_round.push(player_id);
+
+        // Next: find a player who hasn't drawn yet; if everyone has drawn, go to post-draw
+        let start_idx = self.core.get_player_index(player_id).unwrap();
+        let count_players = self.core.table.players.len();
+        let mut next_action = None;
+        for i in 1..=count_players {
+            let idx = (start_idx + i) % count_players;
+            let p = &self.core.table.players[idx];
+            if p.is_folded {
+                continue;
+            }
+            if !self.drawn_this_round.contains(&p.id) {
+                next_action = Some(p.id);
+                break;
+            }
+        }
+        match next_action {
+            Some(uid) => {
+                self.core.action_on = Some(uid);
+            }
+            None => {
+                self.transition_to_post_draw();
+            }
         }
 
         Ok(())

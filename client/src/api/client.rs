@@ -5,7 +5,7 @@
 use poker_core::{
     ActionRequest, AddChipsRequest, AddChipsResponse, CreateGameRequest, GameAction, GameListResponse,
     GameResponse, GameStateUpdate, GameType, HouseRules, JoinGameRequest, PlayerStats, ServerResponse,
-    StatsRequest, ViewerRequest,
+    ViewerRequest,
 };
 use reqwest::Client;
 // FOR PHASE 2 - use reqwest_eventsource::{Event, EventSource}; 
@@ -105,6 +105,27 @@ impl PokerClient {
             .get(format!("{}/games/{}", self.base_url, game_id))
             .query(&[("player_id", player_id)])
             .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            let msg = response
+                .text()
+                .await
+                .unwrap_or_else(|_| format!("Request failed with status {}", status));
+            return Err(ApiError::Server(msg));
+        }
+        let state = response.json().await?;
+        Ok(state)
+    }
+
+    /// Start a hand (Five Card Draw only). Deals 5 cards to each player. Requires at least 2 players.
+    pub async fn start_hand(&self, game_id: &str, player_id: &str) -> Result<GameResponse, ApiError> {
+        let body = serde_json::json!({ "player_id": player_id });
+        let response = self
+            .client
+            .post(format!("{}/games/{}/start", self.base_url, game_id))
+            .json(&body)
+            .send()
             .await?
             .json()
             .await?;
@@ -179,6 +200,7 @@ impl PokerClient {
     // =========================================================================
 
     /// Get player statistics.
+    #[allow(dead_code)]
     pub async fn get_stats(&self, player_id: &str) -> Result<PlayerStats, ApiError> {
         let response = self
             .client
@@ -246,6 +268,7 @@ impl PokerClient {
     }
 
     /// Health check / ping the server.
+    #[allow(dead_code)]
     pub async fn ping(&self) -> Result<ServerResponse, ApiError> {
         let response = self
             .client
