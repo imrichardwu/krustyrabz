@@ -356,7 +356,7 @@ impl Game {
             Game::SevenCardStud(game) => 
                 game.betting_round.clone(), 
             Game::TexasHoldEm(game) => 
-                game.core.betting_round.clone(), 
+                game.betting_round.clone(), 
         }
     }
 
@@ -368,6 +368,25 @@ impl Game {
                 game.core.action_on.clone(), 
             Game::TexasHoldEm(game) => 
                 game.core.action_on.clone(), 
+        }
+    }
+
+    /// Dealer index for building game state (e.g. who is dealer for display).
+    pub fn get_dealer_index(&self) -> usize {
+        match self {
+            Game::FiveCardDraw(game) => game.core.dealer_idx,
+            Game::SevenCardStud(game) => game.core.dealer_idx,
+            Game::TexasHoldEm(game) => game.core.dealer_idx,
+        }
+    }
+
+    /// Starts a new hand (Five Card Draw only for now). Deals 5 cards to each player and sets PreDraw.
+    pub fn start_hand(&mut self) -> Result<(), String> {
+        match self {
+            Game::FiveCardDraw(game) => game.start_hand(),
+            Game::SevenCardStud(_) | Game::TexasHoldEm(_) => {
+                Err("start_hand only supported for Five Card Draw".to_string())
+            }
         }
     }
     pub fn get_max_players(&self) -> usize {
@@ -481,6 +500,32 @@ impl FiveCardDraw {
             core: SharedGameState::new(5),
             betting_round: BettingRound::PreDeal,
         }
+    }
+
+    /// Deals 5 cards to each player and transitions to PreDraw betting.
+    pub fn start_hand(&mut self) -> Result<(), String> {
+        if self.betting_round != BettingRound::PreDeal {
+            return Err("hand_already_started".to_string());
+        }
+        if self.core.table.players.len() < 2 {
+            return Err("need_at_least_2_players".to_string());
+        }
+        self.core.deck.shuffle();
+        for player in &mut self.core.table.players {
+            let cards = self.core.deck.deal(5);
+            if cards.len() != 5 {
+                return Err("not_enough_cards".to_string());
+            }
+            for card in cards {
+                player.hand.add(card);
+            }
+        }
+        self.betting_round = BettingRound::PreDraw;
+        self.core.action_on = None;
+        if !self.core.advance_action(false) {
+            return Err("no_active_players".to_string());
+        }
+        Ok(())
     }
 
     pub fn predraw_betting(

@@ -9,9 +9,8 @@ use poker_core::{
     ActionRequest, AddChipsRequest, AddChipsResponse, CreateGameRequest,
     GameListResponse, GameResponse, GameStateUpdate, GameSummary, GameType, 
     HouseRules, JoinGameRequest, PlayerInfo, PlayerStats, ServerResponse,
-    Hand,
 };
-use crate::betting::{BettingRound, BettingState}; 
+use poker_core::hand::Hand;
 use crate::player::Player;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
@@ -19,10 +18,11 @@ use rocket::{get, post, State};
 use rocket::serde::json::Json;
 
 use storage::entities::user_account::Model;
-use storage::DatabaseConnection; 
 use storage::repository::Repository;
 
 use crate::game::{FiveCardDraw, SevenCardStud, TexasHoldEm};
+use crate::betting::BettingRound as ServerBettingRound;
+use poker_core::protocol::GameAction;
 
 // ============================================================================
 // House Structure
@@ -33,14 +33,16 @@ use crate::game::{FiveCardDraw, SevenCardStud, TexasHoldEm};
 #[derive(Debug)]
 pub struct House {
     pub live_games: Arc<Mutex<HashMap<String, Game>>>,
-    pub hands: Arc<Mutex<HashMap<String, Hand>>>, 
+    /// Optional cache of players' hands keyed by player_id string.
+    /// Currently populated at game creation; can be expanded later.
+    pub hands: Arc<Mutex<HashMap<String, Hand>>>,
 }
 
 impl House {
     pub fn new() -> Self {
         Self {
             live_games: Arc::new(Mutex::new(HashMap::new())),
-            hands: Arc::new(Mutex::new(HashMap::new())), 
+            hands: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -147,10 +149,12 @@ impl House {
         match games.get_mut(game_id) {
             Some(game) => {
                 game.remove_player(player_id)?;
-                if game.is_empty() { self.remove_game(game_id); }
-                Ok(()) 
-            },
-            None => Err(format!("Game not found: {}", game_id).to_string()),
+                if game.is_empty() {
+                    games.remove(game_id);
+                }
+                Ok(())
+            }
+            None => Err(format!("Game not found: {}", game_id)),
         }
     }
 
@@ -272,8 +276,12 @@ pub async fn create_game(
             let mut games = house.live_games.lock().unwrap();
             games.insert(game_id.clone(), new_game);
 
-            let mut hands = house.hands.lock().unwrap(); 
-            hands.insert(player_id.to_string(), player.hand.clone()); 
+            
+            // Initialize an entry for this player's hand in the House cache.
+            // At game creation time the hand is empty; it will be updated later
+            // when cards are dealt.
+            let mut hands = house.hands.lock().unwrap();
+            hands.insert(player_id.to_string(), Hand::new());
             // TODO: Build proper GameStateUpdate from game state
             
             let message = format!("Game created successfully. Waiting for players in game {}", game_id);
@@ -348,19 +356,59 @@ pub async fn get_game(
 ///     - player_id: String
 ///     - game_id: String
 ///     - action: GameAction
-#[post("/games/<_game_id>/action", format = "json", data = "<_request>")]
+#[post("/games/<game_id>/action", format = "json", data = "<request>")]
 pub async fn perform_action(
-    _game_id: String,
-    _request: Json<ActionRequest>,
-    _house: &State<House>,
+    game_id: String,
+    request: Json<ActionRequest>,
+    house: &State<House>,
 ) -> Json<GameResponse> {
+    let inner = request.into_inner();
+    let player_id = match Uuid::parse_str(&inner.player_id) {
+        Ok(id) => id,
+        Err(_) => return Json(GameResponse::error("Invalid player_id".to_string())),
+    };
+    if inner.game_id != game_id {
+        return Json(GameResponse::error("game_id in URL and body must match".to_string()));
+    }
 
-    // TODO: Parse player_id from String to Uuid
-    // TODO: Look up game and perform action
-    // TODO: Return updated game state
+    let mut games = house.live_games.lock().unwrap();
+    let game = match games.get_mut(&game_id) {
+        Some(g) => g,
+        None => return Json(GameResponse::error("Game not found".to_string())),
+    };
 
-    // Placeholder implementation
-    Json(GameResponse::error("Action handling not yet implemented".to_string()))
+    if game.get_game_type() != poker_core::GameType::FiveCardDraw {
+        return Json(GameResponse::error(
+            "Only Five Card Draw is supported for actions".to_string(),
+        ));
+    }
+
+    let result = match &inner.action {
+        GameAction::Fold => handle_fold(game, player_id),
+        GameAction::Check => handle_check(game, player_id),
+        GameAction::Call => handle_call(game, player_id),
+        GameAction::Bet { amount } => handle_bet(game, player_id, *amount),
+        GameAction::Raise { amount } => handle_raise(game, player_id, *amount),
+        GameAction::Draw { discard_indices } => {
+            handle_draw(game, player_id, discard_indices.clone())
+        }
+        GameAction::AllIn => {
+            let err = "AllIn not supported for Five Card Draw".to_string();
+            Err(err)
+        }
+    };
+
+    match result {
+        Ok(()) => {
+            let state = build_game_state_update(game, Some(&inner.player_id));
+            Json(GameResponse::success(
+                "Action applied".to_string(),
+                game_id,
+                state,
+            ))
+        }
+        Err(e) => Json(GameResponse::error(e)),
+    }
 }
 
 /// Returns statistics for a specific player.
@@ -426,33 +474,66 @@ pub async fn register_viewer(
 // Helper Functions
 // ============================================================================
 
+/// Maps server betting round to protocol (core) betting round for Five Card Draw.
+fn to_protocol_betting_round(r: ServerBettingRound) -> poker_core::BettingRound {
+    use poker_core::BettingRound as CoreRound;
+    match r {
+        ServerBettingRound::PreDeal | ServerBettingRound::Drawing => CoreRound::PreDraw,
+        ServerBettingRound::PreDraw => CoreRound::PreDraw,
+        ServerBettingRound::PostDraw => CoreRound::PostDraw,
+        _ => CoreRound::PreDraw,
+    }
+}
+
 /// Builds a GameStateUpdate from the current game state.
 ///
 /// This converts internal game representation to the protocol type
 /// that can be sent to clients.
-///
-/// TODO: Implement proper conversion logic
-async fn build_game_state_update(game: &Game, player_id: Option<&str>, house: &State<House>) -> GameStateUpdate {
-    
-    let mut player_info_list : Vec<Player> = game.iter_mut()
-                                                 .map(|player| player_to_info(player, false))
-                                                 .collect(); 
+fn build_game_state_update(game: &Game, player_id: Option<&str>) -> GameStateUpdate {
+    let players = game.get_players();
+    let dealer_idx = game.get_dealer_index();
+    let betting_state = game.get_betting_state();
+    let players_info: Vec<PlayerInfo> = players
+        .iter()
+        .enumerate()
+        .map(|(i, p)| player_to_info(p, i == dealer_idx))
+        .collect();
 
-    if let Some(val) = player_id { 
-        let player = get_player(player_id.expect("value"), house); 
-    }
+    let (your_hand, your_chips) = match player_id.and_then(|id| Uuid::parse_str(id).ok()) {
+        Some(uid) => {
+            let hand_cards = players
+                .iter()
+                .find(|p| p.id == uid)
+                .map(|p| {
+                    p.hand
+                        .cards()
+                        .iter()
+                        .map(|c| c.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let chips = players
+                .iter()
+                .find(|p| p.id == uid)
+                .map(|p| p.chips)
+                .unwrap_or(0);
+            (hand_cards, chips)
+        }
+        None => (Vec::new(), 0),
+    };
+
     GameStateUpdate {
         game_id: game.get_game_id().to_string(),
         game_type: game.get_game_type(),
         pot: game.get_pot(),
-        current_bet: game.get_betting_state(),  
-        betting_round: game.get_betting_round(), 
-        action_on: game.get_action_on(), 
+        current_bet: betting_state.to_call,
+        betting_round: to_protocol_betting_round(game.get_betting_round()),
+        action_on: game.get_action_on().map(|u| u.to_string()),
         player_count: game.get_player_count(),
-        players: player_info_list, 
-        community_cards: vec![], // TODO: For Texas Hold'em
-        your_hand: vec![], 
-        your_chips: player.chips,
+        players: players_info,
+        community_cards: Vec::new(),
+        your_hand,
+        your_chips,
     }
 }
 
@@ -477,100 +558,148 @@ fn model_to_player(model: &Model) -> Player {
         None => 0, 
     }; 
     Player { 
-        id: model.id.clone(), 
+        id: model.id,
         username: model.username.clone(),  
         chips: token_balance,
         hand: Hand::new(), 
-        current_bet: 0, 
         is_folded: false, 
-        game_id:  model.game_id.clone(),
+        game_id: model.game_id,
+        current_bet: 0,
     }
 }
 
-/// Gets a user account model from the database and converts it to a player 
-/// for protocol communication. 
-async fn get_player_from_db(player_id: &str) -> Player { 
-    let player_id = Uuid::parse_str(player_id).unwrap();  
-    let repo: Repository = Repository::new()
-        .await
-        .expect("Failed to create new repository");
-    
-    let model = repo.get_user_by_id(player_id)
-        .await
-        .expect("Failed to get user");
+/// Gets a user account model from the database and converts it to a Player.
+///
+/// This is a small convenience wrapper around `Repository::get_user_by_id`.
+async fn get_player_from_db(player_id: &str) -> Result<Player, String> {
+    let player_uuid = Uuid::parse_str(player_id).map_err(|e| e.to_string())?;
 
-    model_to_player(&model)
+    let repo = Repository::new()
+        .await
+        .map_err(|e| format!("Failed to create repository: {e}"))?;
+
+    let model = repo
+        .get_user_by_id(player_uuid)
+        .await
+        .map_err(|e| format!("Failed to get user: {e}"))?;
+
+    Ok(model_to_player(&model))
 }
 
-/// Gets the specified player from their current game 
+/// Gets the specified player from their current in-memory game, if any.
 ///
-/// TODO 
-async fn get_player(player_id: &str, house: &State<House>) -> Option<Player> { 
-    let live_games = &house.live_games
-                        .clone()
-                        .lock()
-                        .unwrap(); 
+/// Iterates over all live games in the `House` and returns the first matching player.
+async fn get_player(player_id: &str, house: &State<House>) -> Option<Player> {
+    let games = house.live_games.lock().unwrap();
 
-    
-    for (id, game) in live_games.iter_mut() { 
-        match check_player_in_game(player_id.clone(), game.clone()).await  {
-            Some(val) => { 
-                return &val
-            }, 
-            _ => return ()
+    for game in games.values() {
+        if let Some(player) = find_player_in_game(player_id, game) {
+            return Some(player);
         }
     }
 
-    hand
-    //TODO consider adding more game data to database for phase 2}
+    None
 }
-/// Checks if player is in the given game 
-///
-/// Returns:
-///     That player if yes, nothing otherwise
-async fn check_player_in_game(player_id: &str, game: Game) -> Option<Player>  { 
-    let players = game.get_players(); 
-    players.iter().cloned().find(|player| player.id.to_string() == player_id) 
+
+/// Checks if a player is in the given game and returns them if found.
+fn find_player_in_game(player_id: &str, game: &Game) -> Option<Player> {
+    game.get_players()
+        .into_iter()
+        .find(|player| player.id.to_string() == player_id)
 }
 
 // ============================================================================
-// Action Handler Stubs
+// Action Handlers (Five Card Draw for now)
 // ============================================================================
-// These functions will be called by perform_action based on the action type.
-// They need to be implemented with proper game logic.
+// These functions are called by perform_action. They dispatch to the game's
+// betting or draw logic based on the current phase.
 
-/// Handles a fold action.
-async fn fold(_game_id: String, _player_id: Uuid) -> Result<(), String> {
-    // TODO: Implement fold logic
-    Err("Not implemented".to_string())
+/// Handles a fold action (PreDraw or PostDraw betting).
+fn handle_fold(game: &mut Game, player_id: Uuid) -> Result<(), String> {
+    match game {
+        Game::FiveCardDraw(g) => match g.betting_round {
+            ServerBettingRound::PreDeal => Err("game_not_started".to_string()),
+            ServerBettingRound::PreDraw => g.predraw_betting(player_id, GameAction::Fold),
+            ServerBettingRound::PostDraw => g.postdraw_betting(player_id, GameAction::Fold),
+            ServerBettingRound::Drawing => Err("cannot_fold_in_draw_phase".to_string()),
+            _ => Err("wrong_phase".to_string()),
+        },
+        _ => Err("only Five Card Draw supported".to_string()),
+    }
 }
 
-/// Handles a check action.
-async fn check(_game_id: String, _player_id: Uuid) -> Result<(), String> {
-    // TODO: Implement check logic
-    Err("Not implemented".to_string())
+/// Handles a check action (PreDraw or PostDraw betting).
+fn handle_check(game: &mut Game, player_id: Uuid) -> Result<(), String> {
+    match game {
+        Game::FiveCardDraw(g) => match g.betting_round {
+            ServerBettingRound::PreDeal => Err("game_not_started".to_string()),
+            ServerBettingRound::PreDraw => g.predraw_betting(player_id, GameAction::Check),
+            ServerBettingRound::PostDraw => g.postdraw_betting(player_id, GameAction::Check),
+            ServerBettingRound::Drawing => Err("cannot_check_in_draw_phase".to_string()),
+            _ => Err("wrong_phase".to_string()),
+        },
+        _ => Err("only Five Card Draw supported".to_string()),
+    }
 }
 
-/// Handles a call action.
-async fn call(_game_id: String, _player_id: Uuid) -> Result<(), String> {
-    // TODO: Implement call logic
-    Err("Not implemented".to_string())
+/// Handles a call action (PreDraw or PostDraw betting).
+fn handle_call(game: &mut Game, player_id: Uuid) -> Result<(), String> {
+    match game {
+        Game::FiveCardDraw(g) => match g.betting_round {
+            ServerBettingRound::PreDeal => Err("game_not_started".to_string()),
+            ServerBettingRound::PreDraw => g.predraw_betting(player_id, GameAction::Call),
+            ServerBettingRound::PostDraw => g.postdraw_betting(player_id, GameAction::Call),
+            ServerBettingRound::Drawing => Err("cannot_call_in_draw_phase".to_string()),
+            _ => Err("wrong_phase".to_string()),
+        },
+        _ => Err("only Five Card Draw supported".to_string()),
+    }
 }
 
-/// Handles a bet action.
-async fn bet(_game_id: String, _player_id: Uuid, _amount: u32) -> Result<(), String> {
-    // TODO: Implement bet logic
-    Err("Not implemented".to_string())
+/// Handles a bet action (PreDraw or PostDraw betting).
+fn handle_bet(game: &mut Game, player_id: Uuid, amount: u32) -> Result<(), String> {
+    match game {
+        Game::FiveCardDraw(g) => match g.betting_round {
+            ServerBettingRound::PreDeal => Err("game_not_started".to_string()),
+            ServerBettingRound::PreDraw => {
+                g.predraw_betting(player_id, GameAction::Bet { amount })
+            }
+            ServerBettingRound::PostDraw => {
+                g.postdraw_betting(player_id, GameAction::Bet { amount })
+            }
+            ServerBettingRound::Drawing => Err("cannot_bet_in_draw_phase".to_string()),
+            _ => Err("wrong_phase".to_string()),
+        },
+        _ => Err("only Five Card Draw supported".to_string()),
+    }
 }
 
-/// Handles a raise action.
-async fn raise(_game_id: String, _player_id: Uuid, _amount: u32) -> Result<(), String> {
-    // TODO: Implement raise logic
-    Err("Not implemented".to_string())
+/// Handles a raise action (PreDraw or PostDraw betting).
+fn handle_raise(game: &mut Game, player_id: Uuid, amount: u32) -> Result<(), String> {
+    match game {
+        Game::FiveCardDraw(g) => match g.betting_round {
+            ServerBettingRound::PreDeal => Err("game_not_started".to_string()),
+            ServerBettingRound::PreDraw => {
+                g.predraw_betting(player_id, GameAction::Raise { amount })
+            }
+            ServerBettingRound::PostDraw => {
+                g.postdraw_betting(player_id, GameAction::Raise { amount })
+            }
+            ServerBettingRound::Drawing => Err("cannot_raise_in_draw_phase".to_string()),
+            _ => Err("wrong_phase".to_string()),
+        },
+        _ => Err("only Five Card Draw supported".to_string()),
+    }
 }
 
-/// Handles a draw action (for Five Card Draw).
-async fn draw(_game_id: String, _player_id: Uuid, _discard_indices: Vec<usize>) -> Result<(), String> {
-    // TODO: Implement draw logic
-    Err("Not implemented".to_string())
+/// Handles a draw action (Five Card Draw drawing phase).
+fn handle_draw(
+    game: &mut Game,
+    player_id: Uuid,
+    discard_indices: Vec<usize>,
+) -> Result<(), String> {
+    match game {
+        Game::FiveCardDraw(g) => g.handle_draw_action(player_id, discard_indices),
+        _ => Err("only Five Card Draw supported".to_string()),
+    }
 }

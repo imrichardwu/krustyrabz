@@ -72,7 +72,7 @@ impl Player {
             username,
             chips: starting_chips,
             hand: Hand::new(),
-            game_id: Option<Uuid>, 
+            game_id: None, 
             is_folded: false,
             current_bet: 0,
         }
