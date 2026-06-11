@@ -4,6 +4,7 @@ use dotenv::dotenv;
 use std::env;
 use storage::Repository;
 use uuid::Uuid;
+use tokio::test; 
 
 /// Load .env so DATABASE_URL is set for Repository (UserAccount table).
 /// Tries current dir, then parent (project root when run from client/ or IDE).
@@ -129,7 +130,7 @@ pub async fn register() -> Result<AuthSession, String> {
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
-    
+    println!("{:#?}", response); 
     let status = response.status();
     let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
     
@@ -348,5 +349,154 @@ pub async fn refresh_token(refresh_token: &str) -> Result<AuthSession, String> {
         })
     } else {
         Err("Failed to refresh token".to_string())
+    }
+}
+
+// ===========================================================
+// Unit Tests: Customer Management 
+// ===========================================================
+
+pub async fn mock_login(email: String, password: String) -> Result<AuthSession, String> {
+    ensure_dotenv_loaded();
+    
+    // Use the helper function
+    let session = login_with_credentials(&email, &password).await?;
+
+    // Ensure UserAccount row exists (so create_game / join_game can find the user)
+    if let Ok(user_uuid) = Uuid::parse_str(&session.user_id) {
+        if let Ok(repo) = Repository::new().await {
+            if repo.get_user_by_id(user_uuid).await.is_err() {
+                let _ = repo.create_user(session.username.clone(), user_uuid).await;
+            }
+        }
+    }
+
+    println!("User '{}' logged in successfully!", session.username);
+    Ok(session)
+}
+pub async fn mock_register(email: &str, 
+        password: &str, 
+        username: &str) -> Result<AuthSession, String> 
+    {
+    ensure_dotenv_loaded();
+
+    // Get Supabase URL and anon key from environment
+    let supabase_url = env::var("SUPABASE_URL")
+        .map_err(|_| "SUPABASE_URL not found in .env file")?;
+    
+    let supabase_key = env::var("SUPABASE_KEY")
+        .map_err(|_| "SUPABASE_KEY not found in .env file")?;
+    
+    // Use regular signup endpoint (email confirmation disabled in Supabase settings)
+    let signup_url = format!("{}/auth/v1/signup", supabase_url);
+    
+    let request_body = serde_json::json!({
+        "email": email.clone(),
+        "password": password,
+        "data": {
+            "username": username
+        }
+    });
+    
+    // Make HTTP POST request
+    let client = reqwest::Client::new();
+    let request = client
+        .post(&signup_url)
+        .header("Content-Type", "application/json")
+        .header("apikey", &supabase_key);
+    
+    let response = request
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+    let status = response.status();
+    let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+    
+    if status.is_success() {
+        let auth_response: AuthResponse = serde_json::from_str(&response_text).map_err(|e| format!("Failed to parse registration response: {}", e))?;
+      
+        let access_token: String = auth_response.access_token.ok_or_else(|| "Registration response missing access token".to_string())?;
+        let refresh_token: String = auth_response.refresh_token.ok_or_else(|| "Registration response missing refresh token".to_string())?;
+
+        let session_username = auth_response.user.user_metadata.and_then(|m| m.get("username").and_then(|v| v.as_str().map(|s| s.to_string()))) .unwrap_or_else(|| username.to_string());
+
+        // Create user in app database (UserAccount table) so the server can find you when creating/joining games
+        let user_id = auth_response.user.id.parse::<Uuid>()
+            .map_err(|_| "Invalid user id from Supabase Auth".to_string())?;
+        let repository = Repository::new().await
+            .map_err(|e| format!("Cannot connect to database. Set DATABASE_URL in .env (same as server). Error: {}", e))?;
+        repository.create_user(session_username.clone(), user_id)
+            .await
+            .map_err(|e| format!("User created in Supabase Auth but failed to create in app database (UserAccount). Run migrations: cargo run -p storage --bin migrate -- up. Error: {}", e))?;
+
+        println!("User '{}' registered successfully!", session_username);
+
+        Ok(AuthSession {
+            access_token,
+            refresh_token,
+            user_id: auth_response.user.id,
+            email: auth_response.user.email,
+            username: session_username,
+        })
+    } else {
+        // Registration failed - get error message
+        match serde_json::from_str::<AuthError>(&response_text) {
+            Ok(error) => {
+                Err(format!("Registration failed: {}", error.message))
+            }
+            Err(_) => {
+                Err(format!("Registration failed with status {}: {}", status, response_text))
+            }
+        }
+    }
+}
+
+
+#[cfg(test)] 
+mod tests { 
+    use super::*; 
+    use std::env; 
+    use storage::repository::Repository; 
+    use storage::repository::create_supabase_client; 
+    use storage::entities::user_account::Model;
+    use storage::establish_connection;
+    use rand::prelude::*; 
+    use rand::Rng; 
+
+    
+    // =======================================================
+    // Player account created 
+    // ======================================================= 
+    #[tokio::test]
+    async fn test_account_creation() -> Result<(), Box<dyn std::error::Error>> { 
+        let mut rng = rand::thread_rng(); 
+        let rando: u32 = rng.r#gen(); 
+        println!("{:?}", std::env::var("DATABASE_URL"));
+        mock_register(&format!("tevans{}@ualberta.ca", rando), "secure", 
+                      &format!("tevans{}", rando)).await?; 
+
+        mock_login(format!("tevans{}@ualberta.ca", rando), "secure".to_string()).await?; 
+        Ok(())
+    }
+
+    // =======================================================
+    // Duplicate accounts are not allowed -- should fail 
+    // =======================================================
+    #[tokio::test]
+    #[should_panic] 
+    async fn test_duplicate_accounts()  { 
+        mock_register("tevans3@ualberta.ca", "secure", "tevans3").await.unwrap(); 
+        ()
+    }
+
+    // ========================================================
+    // Player login
+    // ========================================================
+    #[tokio::test] 
+    async fn test_login() -> Result<(), Box<dyn std::error::Error>> { 
+       mock_login("tevans3@ualberta.ca".to_string(), 
+                  "secure".to_string()); 
+       Ok(()) 
     }
 }
