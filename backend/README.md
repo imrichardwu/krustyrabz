@@ -73,6 +73,38 @@ Design choice: client is a thin CLI that delegates rules and state to the server
 
 ---
 
+## Crates Used
+
+Workspace crates:
+
+- **client** — CLI client.
+- **poker_core** — Shared domain types and protocol.
+- **server** — Game host and HTTP/WebSocket API.
+- **storage** — Persistence and migrations.
+
+External crates (across workspace):
+
+- **arrayvec** — Fixed-capacity vectors in core.
+- **async-trait** — Async traits in storage.
+- **dotenv** — Load environment variables for DB/auth config.
+- **futures-util** — Async utilities for WebSocket handling.
+- **rand** — Randomness for decks/shuffling.
+- **reqwest** — HTTP client in CLI.
+- **rocket** — HTTP server framework.
+- **rocket_ws** — WebSocket support for Rocket.
+- **sea-orm** — ORM for storage.
+- **sea-orm-migration** — Database migrations.
+- **serde** — Serialization and deserialization.
+- **serde_json** — JSON handling.
+- **sqlx** — SQL access (Postgres).
+- **strum** — Enum utilities.
+- **strum_macros** — Derive macros for enums.
+- **supabase_rs** — Supabase client.
+- **tokio** — Async runtime.
+- **uuid** — Unique IDs with serde support.
+
+---
+
 ## Data Flow (High Level)
 
 1. **Client** sends HTTP requests (create game, join game, action) with bodies that match `poker_core::protocol` request types.

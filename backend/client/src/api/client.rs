@@ -98,6 +98,19 @@ impl PokerClient {
         Ok(response)
     }
 
+    // Leave a game.
+    #[allow(dead_code)]
+    pub async fn leave_game(&self, player_id: &str, game_id: &str) -> Result<ServerResponse, ApiError> {
+        let response = self            .client
+            .post(format!("{}/games/{}/leave", self.base_url, game_id))
+            .json(&serde_json::json!({ "player_id": player_id }))
+            .send()
+            .await?
+            .json()
+            .await?;
+        Ok(response)
+    }
+
     /// Get current game state.
     pub async fn get_game(&self, game_id: &str, player_id: &str) -> Result<GameStateUpdate, ApiError> {
         let response = self

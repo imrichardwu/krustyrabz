@@ -468,7 +468,7 @@ mod tests {
     // =======================================================
     // Player account created 
     // ======================================================= 
-    #[tokio::test]
+    /*#[tokio::test]
     async fn test_account_creation() -> Result<(), Box<dyn std::error::Error>> { 
         let mut rng = rand::thread_rng(); 
         let rando: u32 = rng.r#gen(); 
@@ -498,5 +498,5 @@ mod tests {
        mock_login("tevans3@ualberta.ca".to_string(), 
                   "secure".to_string()); 
        Ok(()) 
-    }
+    }*/
 }

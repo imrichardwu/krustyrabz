@@ -559,6 +559,30 @@ impl FiveCardDraw {
 
         let round_over = self.core.process_betting_action(player_id, action)?;
 
+        // Check if only one player remains (everyone else folded/left)
+        if self.core.count_active_players() == 1 {
+            let active_players: Vec<_> = self.core.table.players.iter()
+                .filter(|p| !p.is_folded)
+                .collect();
+
+            if let Some(winner) = active_players.first() {
+                let winner_id = winner.id;
+                let winner_name = winner.username.clone();
+                let pot_amount = self.core.pot;
+                
+                if let Some(player) = self.core.table.get_player_mut(winner_id) {
+                    player.chips += pot_amount;
+                }
+                
+                // Set showdown message and reset
+                self.last_showdown = Some(vec![(winner_name, pot_amount)]);
+                self.core.pot = 0;
+                self.core.reset_for_new_hand();
+                self.betting_round = BettingRound::PreDeal;
+            }
+            return Ok(());
+        }
+
         if round_over {
             self.transition_to_draw_phase();
         }
@@ -577,6 +601,30 @@ impl FiveCardDraw {
         }
 
         let round_over = self.core.process_betting_action(player_id, action)?;
+
+        // Check if only one player remains (everyone else folded/left)
+        if self.core.count_active_players() == 1 {
+            let active_players: Vec<_> = self.core.table.players.iter()
+                .filter(|p| !p.is_folded)
+                .collect();
+
+            if let Some(winner) = active_players.first() {
+                let winner_id = winner.id;
+                let winner_name = winner.username.clone();
+                let pot_amount = self.core.pot;
+                
+                if let Some(player) = self.core.table.get_player_mut(winner_id) {
+                    player.chips += pot_amount;
+                }
+                
+                // Set showdown message and reset
+                self.last_showdown = Some(vec![(winner_name, pot_amount)]);
+                self.core.pot = 0;
+                self.core.reset_for_new_hand();
+                self.betting_round = BettingRound::PreDeal;
+            }
+            return Ok(());
+        }
 
         if round_over {
             self.transition_to_showdown();

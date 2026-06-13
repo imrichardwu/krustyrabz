@@ -354,6 +354,38 @@ pub async fn join_game(
     }
 }
 
+#[post("/games/<game_id>/leave", format = "json", data = "<request>")]
+pub async fn leave_game(
+    game_id: String,
+    request: Json<JoinGameRequest>,
+    house: &State<House>,
+) -> Json<GameResponse> {
+    let inner_request = request.into_inner();
+    let player_id = match Uuid::parse_str(&inner_request.player_id) {
+        Ok(id) => id,
+        Err(_) => return Json(GameResponse::error("Invalid player_id".to_string())),
+    };
+
+    match house.remove_player(&game_id, player_id) {
+        Ok(_) => {
+            // Get updated game state to notify remaining players
+            let games = house.live_games.lock().unwrap();
+            let game_state = games.get(&game_id).map(|game| {
+                build_game_state_update(game, None)
+            });
+            
+            let message = format!("Left game {}", game_id);
+            Json(GameResponse {
+                success: true,
+                message,
+                game_id: Some(game_id),
+                game_state,
+            })
+        }
+        Err(e) => Json(GameResponse::error(format!("Failed to leave game: {}", e))),
+    }
+}
+
 /// Starts a hand (Five Card Draw only). Deals 5 cards to each player and transitions to PreDraw betting.
 ///
 /// Request body: `{ "player_id": "..." }` (player must be in the game).
