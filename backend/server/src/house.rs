@@ -407,12 +407,6 @@ pub async fn start_hand(
         None => return Json(GameResponse::error("Game not found".to_string())),
     };
 
-    if game.get_game_type() != GameType::FiveCardDraw {
-        return Json(GameResponse::error(
-            "Only Five Card Draw supports start_hand".to_string(),
-        ));
-    }
-
     match game.start_hand() {
         Ok(()) => {
             let state = build_game_state_update(game, Some(&player_id_str));
@@ -471,24 +465,18 @@ pub async fn perform_action(
         None => return Json(GameResponse::error("Game not found".to_string())),
     };
 
-    if game.get_game_type() != poker_core::GameType::FiveCardDraw {
-        return Json(GameResponse::error(
-            "Only Five Card Draw is supported for actions".to_string(),
-        ));
-    }
-
-    let result = match &inner.action {
-        GameAction::Fold => handle_fold(game, player_id),
-        GameAction::Check => handle_check(game, player_id),
-        GameAction::Call => handle_call(game, player_id),
-        GameAction::Bet { amount } => handle_bet(game, player_id, *amount),
-        GameAction::Raise { amount } => handle_raise(game, player_id, *amount),
-        GameAction::Draw { discard_indices } => {
-            handle_draw(game, player_id, discard_indices.clone())
-        }
-        GameAction::AllIn => {
-            let err = "AllIn not supported for Five Card Draw".to_string();
-            Err(err)
+    let result = match game.get_game_type() {
+        poker_core::GameType::FiveCardDraw => match &inner.action {
+            GameAction::Fold => handle_fold(game, player_id),
+            GameAction::Check => handle_check(game, player_id),
+            GameAction::Call => handle_call(game, player_id),
+            GameAction::Bet { amount } => handle_bet(game, player_id, *amount),
+            GameAction::Raise { amount } => handle_raise(game, player_id, *amount),
+            GameAction::Draw { discard_indices } => handle_draw(game, player_id, discard_indices.clone()),
+            GameAction::AllIn => Err("AllIn not supported for Five Card Draw".to_string()),
+        },
+        poker_core::GameType::SevenCardStud | poker_core::GameType::TexasHoldEm => {
+            game.handle_action(player_id, inner.action.clone())
         }
     };
 
@@ -661,15 +649,23 @@ pub async fn register_viewer(
 // Helper Functions
 // ============================================================================
 
-/// Maps server betting round to protocol (core) betting round for Five Card Draw.
+/// Maps server betting round to protocol (core) betting round.
 fn to_protocol_betting_round(r: ServerBettingRound) -> poker_core::BettingRound {
     use poker_core::BettingRound as CoreRound;
     match r {
-        ServerBettingRound::PreDeal => CoreRound::PreDraw, // client shows PreDraw until hand starts
-        ServerBettingRound::PreDraw => CoreRound::PreDraw,
-        ServerBettingRound::Drawing => CoreRound::Drawing,
-        ServerBettingRound::PostDraw => CoreRound::PostDraw,
-        _ => CoreRound::PreDraw,
+        ServerBettingRound::PreDeal    => CoreRound::PreDraw,
+        ServerBettingRound::PreDraw    => CoreRound::PreDraw,
+        ServerBettingRound::Drawing    => CoreRound::Drawing,
+        ServerBettingRound::PostDraw   => CoreRound::PostDraw,
+        ServerBettingRound::PreFlop    => CoreRound::PreFlop,
+        ServerBettingRound::Flop       => CoreRound::Flop,
+        ServerBettingRound::Turn       => CoreRound::Turn,
+        ServerBettingRound::River      => CoreRound::River,
+        ServerBettingRound::ThirdStreet   => CoreRound::ThirdStreet,
+        ServerBettingRound::FourthStreet  => CoreRound::FourthStreet,
+        ServerBettingRound::FifthStreet   => CoreRound::FifthStreet,
+        ServerBettingRound::SixthStreet   => CoreRound::SixthStreet,
+        ServerBettingRound::SeventhStreet => CoreRound::River, // 7th street maps to River in protocol
     }
 }
 
@@ -738,7 +734,7 @@ fn build_game_state_update(game: &Game, player_id: Option<&str>) -> GameStateUpd
         action_on: action_on_username,
         player_count: game.get_player_count(),
         players: players_info,
-        community_cards: Vec::new(),
+        community_cards: game.get_community_cards(),
         your_hand,
         your_chips,
         last_hand_message,

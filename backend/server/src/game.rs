@@ -2,7 +2,7 @@ use crate::betting::{BettingRound, BettingState};
 use crate::deck::Deck;
 use crate::player::Player;
 use crate::table::Table;
-use poker_core::{DeckTrait, GameType, GameStatus};
+use poker_core::{Card, CardType, DeckTrait, GameType, GameStatus};
 use strum_macros::Display;
 use uuid::Uuid;
 
@@ -385,13 +385,25 @@ impl Game {
         }
     }
 
-    /// Starts a new hand (Five Card Draw only for now). Deals 5 cards to each player and sets PreDraw.
+    /// Starts a new hand for any supported game variant.
     pub fn start_hand(&mut self) -> Result<(), String> {
         match self {
             Game::FiveCardDraw(game) => game.start_hand(),
-            Game::SevenCardStud(_) | Game::TexasHoldEm(_) => {
-                Err("start_hand only supported for Five Card Draw".to_string())
-            }
+            Game::SevenCardStud(game) => game.start_hand(),
+            Game::TexasHoldEm(game) => game.start_hand(),
+        }
+    }
+
+    /// Dispatches a player action to the appropriate game variant.
+    pub fn handle_action(
+        &mut self,
+        player_id: Uuid,
+        action: poker_core::protocol::GameAction,
+    ) -> Result<(), String> {
+        match self {
+            Game::FiveCardDraw(_) => Err("use per-action handlers for Five Card Draw".to_string()),
+            Game::SevenCardStud(game) => game.handle_action(player_id, action),
+            Game::TexasHoldEm(game) => game.handle_action(player_id, action),
         }
     }
     pub fn get_max_players(&self) -> usize {
@@ -410,11 +422,20 @@ impl Game {
         }
     }
 
-    /// Last hand result (winner names and amounts) for Five Card Draw; None for other variants or before any showdown.
+    /// Last hand result (winner names and amounts); None before any showdown.
     pub fn get_last_showdown(&self) -> Option<Vec<(String, u32)>> {
         match self {
             Game::FiveCardDraw(game) => game.last_showdown.clone(),
-            _ => None,
+            Game::SevenCardStud(game) => game.last_showdown.clone(),
+            Game::TexasHoldEm(game) => game.last_showdown.clone(),
+        }
+    }
+
+    /// Community cards (Texas Hold'em only); empty for other variants.
+    pub fn get_community_cards(&self) -> Vec<String> {
+        match self {
+            Game::TexasHoldEm(game) => game.community_cards.iter().map(|c| c.to_string()).collect(),
+            _ => Vec::new(),
         }
     }
 
@@ -786,11 +807,16 @@ impl FiveCardDraw {
     }
 }
 
+// ============================================================================
+// Seven Card Stud
+// ============================================================================
+
 #[derive(Debug, Clone)]
 pub struct SevenCardStud {
     pub game_id: Uuid,
     pub core: SharedGameState,
     pub betting_round: BettingRound,
+    pub last_showdown: Option<Vec<(String, u32)>>,
 }
 
 impl SevenCardStud {
@@ -799,15 +825,157 @@ impl SevenCardStud {
             game_id: Uuid::new_v4(),
             core: SharedGameState::new(7),
             betting_round: BettingRound::PreDeal,
+            last_showdown: None,
         }
     }
+
+    /// Deals 2 private cards + 1 face-up card to each player and starts Third Street.
+    pub fn start_hand(&mut self) -> Result<(), String> {
+        if self.betting_round != BettingRound::PreDeal {
+            return Err("hand_already_started".to_string());
+        }
+        if self.core.table.players.len() < 2 {
+            return Err("need_at_least_2_players".to_string());
+        }
+        self.last_showdown = None;
+        self.core.deck.shuffle();
+
+        // Deal 2 down + 1 up to every player
+        for player in &mut self.core.table.players {
+            let mut three = self.core.deck.deal(3);
+            if three.len() < 3 {
+                return Err("not_enough_cards".to_string());
+            }
+            let up = three.pop().unwrap();
+            player.hand.add(Card::construct(three[0].rank, three[0].suit, CardType::Private));
+            player.hand.add(Card::construct(three[1].rank, three[1].suit, CardType::Private));
+            player.hand.add(Card::construct(up.rank, up.suit, CardType::Up));
+        }
+
+        self.betting_round = BettingRound::ThirdStreet;
+        self.core.action_on = None;
+        if !self.core.advance_action(false) {
+            return Err("no_active_players".to_string());
+        }
+        Ok(())
+    }
+
+    /// Handles any betting action for the current street.
+    pub fn handle_action(
+        &mut self,
+        player_id: Uuid,
+        action: poker_core::protocol::GameAction,
+    ) -> Result<(), String> {
+        match self.betting_round {
+            BettingRound::PreDeal => Err("game_not_started".to_string()),
+            BettingRound::ThirdStreet
+            | BettingRound::FourthStreet
+            | BettingRound::FifthStreet
+            | BettingRound::SixthStreet
+            | BettingRound::SeventhStreet => self.street_betting(player_id, action),
+            _ => Err("wrong_phase".to_string()),
+        }
+    }
+
+    fn street_betting(
+        &mut self,
+        player_id: Uuid,
+        action: poker_core::protocol::GameAction,
+    ) -> Result<(), String> {
+        let round_over = self.core.process_betting_action(player_id, action)?;
+
+        // Last player standing wins immediately
+        if self.core.count_active_players() == 1 {
+            self.award_last_player();
+            return Ok(());
+        }
+
+        if round_over {
+            match self.betting_round {
+                BettingRound::ThirdStreet => self.deal_next_street(BettingRound::FourthStreet, CardType::Up),
+                BettingRound::FourthStreet => self.deal_next_street(BettingRound::FifthStreet, CardType::Up),
+                BettingRound::FifthStreet => self.deal_next_street(BettingRound::SixthStreet, CardType::Up),
+                BettingRound::SixthStreet => self.deal_next_street(BettingRound::SeventhStreet, CardType::Private),
+                BettingRound::SeventhStreet => self.transition_to_showdown(),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Deals one card to every non-folded player and advances to the next street.
+    fn deal_next_street(&mut self, next_round: BettingRound, card_type: CardType) {
+        self.core.reset_current_bets();
+
+        for player in &mut self.core.table.players {
+            if !player.is_folded {
+                if let Some(raw) = self.core.deck.deal(1).into_iter().next() {
+                    player.hand.add(Card::construct(raw.rank, raw.suit, card_type));
+                }
+            }
+        }
+
+        self.betting_round = next_round;
+        self.core.action_on = None;
+        if !self.core.advance_action(false) {
+            self.transition_to_showdown();
+        }
+    }
+
+    fn award_last_player(&mut self) {
+        if let Some(winner) = self.core.table.players.iter().find(|p| !p.is_folded) {
+            let winner_id = winner.id;
+            let winner_name = winner.username.clone();
+            let pot_amount = self.core.pot;
+            if let Some(player) = self.core.table.get_player_mut(winner_id) {
+                player.chips += pot_amount;
+            }
+            self.last_showdown = Some(vec![(winner_name, pot_amount)]);
+            self.core.pot = 0;
+            self.core.reset_for_new_hand();
+            self.betting_round = BettingRound::PreDeal;
+        }
+    }
+
+    fn transition_to_showdown(&mut self) {
+        self.core.reset_current_bets();
+        let results = self.core.resolve_showdown();
+        self.last_showdown = Some(
+            results
+                .iter()
+                .map(|(uid, amt)| {
+                    let name = self
+                        .core
+                        .table
+                        .players
+                        .iter()
+                        .find(|p| p.id == *uid)
+                        .map(|p| p.username.clone())
+                        .unwrap_or_else(|| uid.to_string());
+                    (name, *amt)
+                })
+                .collect(),
+        );
+        self.core.reset_for_new_hand();
+        self.betting_round = BettingRound::PreDeal;
+    }
 }
+
+// ============================================================================
+// Texas Hold'em
+// ============================================================================
+
+const SMALL_BLIND: u32 = 5;
+const BIG_BLIND: u32 = 10;
 
 #[derive(Debug, Clone)]
 pub struct TexasHoldEm {
     pub game_id: Uuid,
     pub core: SharedGameState,
     pub betting_round: BettingRound,
+    pub last_showdown: Option<Vec<(String, u32)>>,
+    /// The shared community cards (flop/turn/river).
+    pub community_cards: Vec<Card>,
 }
 
 impl TexasHoldEm {
@@ -816,6 +984,169 @@ impl TexasHoldEm {
             game_id: Uuid::new_v4(),
             core: SharedGameState::new(9),
             betting_round: BettingRound::PreDeal,
+            last_showdown: None,
+            community_cards: Vec::new(),
         }
+    }
+
+    /// Posts blinds, deals 2 private hole cards to each player, and starts PreFlop.
+    pub fn start_hand(&mut self) -> Result<(), String> {
+        if self.betting_round != BettingRound::PreDeal {
+            return Err("hand_already_started".to_string());
+        }
+        if self.core.table.players.len() < 2 {
+            return Err("need_at_least_2_players".to_string());
+        }
+        self.last_showdown = None;
+        self.community_cards.clear();
+        self.core.deck.shuffle();
+
+        let count = self.core.table.players.len();
+        let sb_idx = (self.core.dealer_idx + 1) % count;
+        let bb_idx = (self.core.dealer_idx + 2) % count;
+        let sb_id = self.core.table.players[sb_idx].id;
+        let bb_id = self.core.table.players[bb_idx].id;
+
+        // Post blinds (best-effort; player may not have enough chips)
+        let _ = self.core.post_bet(sb_id, SMALL_BLIND.min(
+            self.core.table.players[sb_idx].chips
+        ));
+        let _ = self.core.post_bet(bb_id, BIG_BLIND.min(
+            self.core.table.players[bb_idx].chips
+        ));
+
+        // BB acts as the initial "aggressor" so PreFlop ends correctly
+        self.core.betting_state.to_call = BIG_BLIND;
+        self.core.betting_state.last_aggressor = Some(bb_id);
+
+        // Deal 2 private cards to each player
+        for player in &mut self.core.table.players {
+            let cards = self.core.deck.deal(2);
+            if cards.len() < 2 {
+                return Err("not_enough_cards".to_string());
+            }
+            for card in cards {
+                player.hand.add(Card::construct(card.rank, card.suit, CardType::Private));
+            }
+        }
+
+        self.betting_round = BettingRound::PreFlop;
+        // Start action at UTG (player after BB)
+        self.core.action_on = Some(bb_id);
+        if !self.core.advance_action(false) {
+            return Err("no_active_players".to_string());
+        }
+        Ok(())
+    }
+
+    /// Handles a betting action for the current round.
+    pub fn handle_action(
+        &mut self,
+        player_id: Uuid,
+        action: poker_core::protocol::GameAction,
+    ) -> Result<(), String> {
+        match self.betting_round {
+            BettingRound::PreDeal => Err("game_not_started".to_string()),
+            BettingRound::PreFlop
+            | BettingRound::Flop
+            | BettingRound::Turn
+            | BettingRound::River => self.round_betting(player_id, action),
+            _ => Err("wrong_phase".to_string()),
+        }
+    }
+
+    fn round_betting(
+        &mut self,
+        player_id: Uuid,
+        action: poker_core::protocol::GameAction,
+    ) -> Result<(), String> {
+        let round_over = self.core.process_betting_action(player_id, action)?;
+
+        // Last player standing wins immediately
+        if self.core.count_active_players() == 1 {
+            self.award_last_player();
+            return Ok(());
+        }
+
+        if round_over {
+            match self.betting_round {
+                BettingRound::PreFlop => self.deal_flop(),
+                BettingRound::Flop => self.deal_turn(),
+                BettingRound::Turn => self.deal_river(),
+                BettingRound::River => self.transition_to_showdown(),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn deal_community(&mut self, count: usize, next_round: BettingRound) {
+        self.core.reset_current_bets();
+        let cards = self.core.deck.deal(count);
+        for card in cards {
+            let community = Card::construct(card.rank, card.suit, CardType::Community);
+            self.community_cards.push(community);
+        }
+        self.betting_round = next_round;
+        self.core.action_on = None;
+        if !self.core.advance_action(false) {
+            self.transition_to_showdown();
+        }
+    }
+
+    fn deal_flop(&mut self) { self.deal_community(3, BettingRound::Flop); }
+    fn deal_turn(&mut self) { self.deal_community(1, BettingRound::Turn); }
+    fn deal_river(&mut self) { self.deal_community(1, BettingRound::River); }
+
+    fn award_last_player(&mut self) {
+        if let Some(winner) = self.core.table.players.iter().find(|p| !p.is_folded) {
+            let winner_id = winner.id;
+            let winner_name = winner.username.clone();
+            let pot_amount = self.core.pot;
+            if let Some(player) = self.core.table.get_player_mut(winner_id) {
+                player.chips += pot_amount;
+            }
+            self.last_showdown = Some(vec![(winner_name, pot_amount)]);
+            self.core.pot = 0;
+            self.community_cards.clear();
+            self.core.reset_for_new_hand();
+            self.betting_round = BettingRound::PreDeal;
+        }
+    }
+
+    fn transition_to_showdown(&mut self) {
+        self.core.reset_current_bets();
+
+        // Combine each player's hole cards with the 5 community cards for evaluation
+        let community = self.community_cards.clone();
+        for player in &mut self.core.table.players {
+            if !player.is_folded {
+                for &card in &community {
+                    player.hand.add(card);
+                }
+            }
+        }
+
+        let results = self.core.resolve_showdown();
+        self.last_showdown = Some(
+            results
+                .iter()
+                .map(|(uid, amt)| {
+                    let name = self
+                        .core
+                        .table
+                        .players
+                        .iter()
+                        .find(|p| p.id == *uid)
+                        .map(|p| p.username.clone())
+                        .unwrap_or_else(|| uid.to_string());
+                    (name, *amt)
+                })
+                .collect(),
+        );
+
+        self.community_cards.clear();
+        self.core.reset_for_new_hand();
+        self.betting_round = BettingRound::PreDeal;
     }
 }
