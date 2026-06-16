@@ -1,8 +1,36 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Midnight Navy — deep jewel background, not flat black */
+  --background: #080a14;
+  --foreground: #f0ede8;
+  --silver: #787878;
+  --silver-light: #a0a09c;
+  /* Platinum — silver hair from cover */
+  --platinum: #c4c5ca;
+  --platinum-light: #dcdde2;
+  --platinum-dark: #9fa0a6;
+  --charcoal: #161824;
+  --charcoal-deep: #0e1020;
+  --mid-grey: #444444;
+  --light-grey: #c8c4bc;
+  /* Crimson — red dress from cover */
+  --crimson: #c0102a;
+  --crimson-dark: #8e0b1e;
+  --crimson-light: #e01530;
+  /* Vogue Rose — magazine masthead blush */
+  --vogue-rose: #c8909a;
+  --vogue-rose-light: #e0b4bc;
+  --vogue-rose-dark: #a0606e;
+  /* Gold — light, warmth, casino glamour */
+  --gold: #d4a520;
+  --gold-light: #f0c84a;
+  --gold-dark: #a07210;
+  --gold-warm: #e8b840;
+  --surface: #0c0e1b;
+  --surface-raised: #141728;
+  --border: rgba(240, 237, 232, 0.12);
+  --border-strong: rgba(240, 237, 232, 0.3);
 }
 
 @theme inline {
@@ -12,15 +40,362 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+body {
+  background:
+    /* crimson glow — top left */
+    radial-gradient(
+      ellipse at 10% 0%,
+      rgba(192, 16, 42, 0.2) 0%,
+      transparent 45%
+    ),
+    /* gold light — top right, the light source */
+    radial-gradient(
+        ellipse at 82% 0%,
+        rgba(212, 165, 32, 0.18) 0%,
+        transparent 42%
+      ),
+    /* warm gold radiance — centre top */
+    radial-gradient(
+        ellipse at 50% 0%,
+        rgba(232, 184, 64, 0.07) 0%,
+        transparent 32%
+      ),
+    /* deep midnight navy — centre bottom */
+    radial-gradient(
+        ellipse at 50% 100%,
+        rgba(20, 30, 80, 0.28) 0%,
+        transparent 55%
+      ),
+    linear-gradient(180deg, #0e1020 0%, #080a14 50%, #05070f 100%);
+  color: var(--foreground);
+  font-family:
+    "Inter",
+    "Segoe UI",
+    -apple-system,
+    BlinkMacSystemFont,
+    Arial,
+    sans-serif;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-body {
-  background: var(--background);
+@keyframes flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  35% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.95;
+  }
+  70% {
+    opacity: 0.88;
+  }
+}
+
+@keyframes drift {
+  0% {
+    transform: translateX(0px) translateY(0px);
+  }
+  50% {
+    transform: translateX(8px) translateY(-6px);
+  }
+  100% {
+    transform: translateX(0px) translateY(0px);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes glow {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(212, 175, 55, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 34px rgba(212, 175, 55, 0.4);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.6s ease-out;
+}
+
+.animate-slideInLeft {
+  animation: slideInLeft 0.6s ease-out;
+}
+
+.animate-slideInRight {
+  animation: slideInRight 0.6s ease-out;
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+.animate-flicker {
+  animation: flicker 3s linear infinite;
+}
+
+.animate-drift {
+  animation: drift 6s ease-in-out infinite;
+}
+
+/* ── Shared surface ── */
+.cs-surface {
+  background: linear-gradient(
+    160deg,
+    rgba(16, 18, 30, 0.98),
+    rgba(8, 10, 20, 0.99)
+  );
+  border: 1px solid rgba(240, 237, 232, 0.12);
+  box-shadow:
+    0 1px 0 rgba(192, 16, 42, 0.06) inset,
+    0 24px 60px rgba(0, 0, 0, 0.9),
+    0 0 0 0.5px rgba(212, 165, 32, 0.06) inset;
+}
+
+/* ── Primary (gold — symbolizing light) button ── */
+.cs-btn {
+  background: linear-gradient(180deg, #f0c84a 0%, #d4a520 55%, #a07210 100%);
+  color: #0a0a0a;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  border: 1px solid rgba(160, 114, 16, 0.6);
+  transition:
+    filter 0.15s ease,
+    transform 0.15s ease;
+}
+
+.cs-btn:hover {
+  filter: brightness(1.08);
+}
+
+/* ── Ghost button ── */
+.cs-btn-ghost {
+  background: transparent;
+  color: var(--silver-light);
+  border: 1px solid var(--border-strong);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.cs-btn-ghost:hover {
+  border-color: var(--platinum);
+  color: var(--platinum-light);
+}
+
+/* ── Danger (Vogue crimson dress) button ── */
+.cs-btn-danger {
+  background: linear-gradient(180deg, #e01530 0%, #c0102a 100%);
+  color: #fff0f2;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid rgba(192, 16, 42, 0.7);
+  transition: filter 0.15s ease;
+}
+
+.cs-btn-danger:hover {
+  filter: brightness(1.12);
+}
+
+/* ── Input ── */
+.cs-input {
+  background: rgba(6, 6, 6, 0.96);
+  border: 1px solid rgba(240, 237, 232, 0.14);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.cs-input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(212, 165, 32, 0.14);
+}
+
+.cs-input::placeholder {
+  color: rgba(160, 160, 156, 0.4);
+}
+
+/* ── Decorative rule ── */
+.cs-rule {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(192, 16, 42, 0.6) 15%,
+    rgba(212, 165, 32, 0.9) 35%,
+    rgba(240, 200, 74, 0.95) 50%,
+    rgba(212, 165, 32, 0.9) 65%,
+    rgba(192, 16, 42, 0.6) 85%,
+    transparent
+  );
+  opacity: 1;
+}
+
+/* Legacy aliases */
+.west-surface {
+  background: linear-gradient(
+    160deg,
+    rgba(16, 18, 30, 0.98),
+    rgba(8, 10, 20, 0.99)
+  );
+  border: 1px solid var(--border);
+  box-shadow:
+    0 1px 0 rgba(240, 237, 232, 0.04) inset,
+    0 24px 60px rgba(0, 0, 0, 0.85);
+}
+
+.west-button {
+  background: linear-gradient(180deg, #f0c84a 0%, #d4a520 55%, #a07210 100%);
+  color: #0a0a0a;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border: 1px solid rgba(160, 114, 16, 0.6);
+  transition:
+    filter 0.15s ease,
+    transform 0.15s ease;
+}
+
+.west-button:hover {
+  filter: brightness(1.08);
+}
+
+.west-outline-button {
+  background: transparent;
+  color: var(--silver-light);
+  border: 1px solid var(--border-strong);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.west-outline-button:hover {
+  border-color: var(--platinum);
+  color: var(--platinum-light);
+}
+
+.west-input {
+  background: rgba(6, 6, 6, 0.96);
+  border: 1px solid rgba(240, 237, 232, 0.14);
+  color: var(--foreground);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.west-input:focus {
+  border-color: var(--platinum);
+  box-shadow: 0 0 0 3px rgba(196, 197, 202, 0.14);
+}
+
+.west-input::placeholder {
+  color: rgba(160, 160, 156, 0.4);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #080808;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #c4c5ca;
+}
+
+::selection {
+  background-color: #c0102a;
+  color: #fff0f2;
+}
+
+*:focus-visible {
+  outline: 1px solid #c4c5ca;
+  outline-offset: 2px;
+}
+
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Remove focus outline for mouse users */
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Animation delays */
+.delay-100 {
+  animation-delay: 100ms;
+}
+
+.delay-200 {
+  animation-delay: 200ms;
+}
+
+.delay-300 {
+  animation-delay: 300ms;
+}
+
+.delay-500 {
+  animation-delay: 500ms;
+}
+
+.delay-700 {
+  animation-delay: 700ms;
 }
