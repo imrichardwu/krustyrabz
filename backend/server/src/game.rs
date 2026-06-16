@@ -481,15 +481,57 @@ impl Game {
         match self {
             Game::FiveCardDraw(game) => {
                 game.core.table.remove_player_from_table(player_id)
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.to_string())?;
+                // If a hand is in progress and only 1 player remains, that player auto-wins.
+                if game.betting_round != BettingRound::PreDeal
+                    && game.core.table.players.len() == 1
+                {
+                    let winner_id = game.core.table.players[0].id;
+                    let winner_name = game.core.table.players[0].username.clone();
+                    let pot_amount = game.core.pot;
+                    if let Some(player) = game.core.table.get_player_mut(winner_id) {
+                        player.chips += pot_amount;
+                    }
+                    game.last_showdown = Some(vec![(winner_name, pot_amount)]);
+                    game.core.pot = 0;
+                    game.core.reset_for_new_hand();
+                    game.betting_round = BettingRound::PreDeal;
+                }
+                Ok(())
             }
             Game::SevenCardStud(game) => {
                 game.core.table.remove_player_from_table(player_id)
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.to_string())?;
+                if game.betting_round != BettingRound::PreDeal
+                    && game.core.table.players.len() == 1
+                {
+                    let winner_id = game.core.table.players[0].id;
+                    let pot_amount = game.core.pot;
+                    if let Some(player) = game.core.table.get_player_mut(winner_id) {
+                        player.chips += pot_amount;
+                    }
+                    game.core.pot = 0;
+                    game.core.reset_for_new_hand();
+                    game.betting_round = BettingRound::PreDeal;
+                }
+                Ok(())
             }
             Game::TexasHoldEm(game) => {
                 game.core.table.remove_player_from_table(player_id)
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.to_string())?;
+                if game.betting_round != BettingRound::PreDeal
+                    && game.core.table.players.len() == 1
+                {
+                    let winner_id = game.core.table.players[0].id;
+                    let pot_amount = game.core.pot;
+                    if let Some(player) = game.core.table.get_player_mut(winner_id) {
+                        player.chips += pot_amount;
+                    }
+                    game.core.pot = 0;
+                    game.core.reset_for_new_hand();
+                    game.betting_round = BettingRound::PreDeal;
+                }
+                Ok(())
             }
         }
     }
