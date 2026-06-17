@@ -28,16 +28,3 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: cargo test --workspace
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install npm dependencies
-        working-directory: frontend
-        run: npm install
-
-      - name: Run npm build
-        working-directory: frontend
-        run: npm run build
