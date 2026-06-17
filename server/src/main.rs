@@ -55,6 +55,7 @@ fn rocket() -> _ {
                 house::add_chips,
                 house::register_viewer,
                 house::get_rules,
+                house::game_events,
             ],
         )
 }

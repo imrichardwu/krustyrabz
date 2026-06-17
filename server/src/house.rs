@@ -23,6 +23,8 @@ use storage::repository::Repository;
 use crate::game::{FiveCardDraw, SevenCardStud, TexasHoldEm};
 use crate::betting::BettingRound as ServerBettingRound;
 use poker_core::protocol::GameAction;
+use tokio::sync::broadcast;
+use rocket::response::stream::{Event, EventStream};
 
 // ============================================================================
 // House Structure
@@ -36,6 +38,8 @@ pub struct House {
     /// Optional cache of players' hands keyed by player_id string.
     /// Currently populated at game creation; can be expanded later.
     pub hands: Arc<Mutex<HashMap<String, Hand>>>,
+    /// Per-game broadcast channels for SSE push updates.
+    pub event_senders: Arc<Mutex<HashMap<String, broadcast::Sender<String>>>>,
 }
 
 impl House {
@@ -43,6 +47,7 @@ impl House {
         Self {
             live_games: Arc::new(Mutex::new(HashMap::new())),
             hands: Arc::new(Mutex::new(HashMap::new())),
+            event_senders: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -123,16 +128,39 @@ impl House {
         }
     }
 
-    /// Helper method to remove an empty game. 
+    /// Creates a broadcast channel for the given game, used to push SSE updates.
+    pub fn create_event_channel(&self, game_id: &str) {
+        let (tx, _) = broadcast::channel(32);
+        self.event_senders.lock().unwrap().insert(game_id.to_string(), tx);
+    }
+
+    /// Broadcasts the current public game state to all SSE subscribers of a game.
+    pub fn broadcast_game_state(&self, game_id: &str) {
+        let json = {
+            let games = self.live_games.lock().unwrap();
+            games.get(game_id)
+                .and_then(|game| serde_json::to_string(&build_game_state_update(game, None)).ok())
+        };
+        if let Some(json) = json {
+            let senders = self.event_senders.lock().unwrap();
+            if let Some(tx) = senders.get(game_id) {
+                let _ = tx.send(json);
+            }
+        }
+    }
+
+    /// Helper method to remove an empty game.
     ///
-    /// Parameters: 
-    ///     game_id   - The game to remove from the house 
+    /// Parameters:
+    ///     game_id   - The game to remove from the house
     ///
-    /// Returns: 
+    /// Returns:
     ///     Result<(), String>
-    pub fn remove_game(&self, game_id: &str) -> Result<(), String> { 
-        let mut games = self.live_games.lock().unwrap(); 
+    pub fn remove_game(&self, game_id: &str) -> Result<(), String> {
+        let mut games = self.live_games.lock().unwrap();
         games.remove(game_id).ok_or(format!("Failed to remove game: {}", game_id))?;
+        drop(games);
+        self.event_senders.lock().unwrap().remove(game_id);
         Ok(())
     }
 
@@ -181,6 +209,8 @@ impl House {
 
                 let mut games = self.live_games.lock().unwrap();
                 games.insert(game_id.clone(), new_game);
+                drop(games);
+                self.create_event_channel(&game_id);
 
                 Ok(game_id)
             }
@@ -286,16 +316,15 @@ pub async fn create_game(
 
     match new_game.add_player(player) {
         Ok(_) => {
-            let mut games = house.live_games.lock().unwrap();
-            games.insert(game_id.clone(), new_game);
-
-            // Initialize an entry for this player's hand in the House cache.
-            let mut hands = house.hands.lock().unwrap();
-            hands.insert(player_id.to_string(), Hand::new());
-
-            let game = games.get(&game_id).expect("just inserted");
-            let state = build_game_state_update(game, Some(&inner_request.player_id));
-
+            let state = {
+                let mut games = house.live_games.lock().unwrap();
+                games.insert(game_id.clone(), new_game);
+                let mut hands = house.hands.lock().unwrap();
+                hands.insert(player_id.to_string(), Hand::new());
+                let game = games.get(&game_id).expect("just inserted");
+                build_game_state_update(game, Some(&inner_request.player_id))
+            }; // games and hands locks released
+            house.create_event_channel(&game_id);
             let message = format!(
                 "Game created successfully. Waiting for players in game {}",
                 game_id
@@ -334,14 +363,17 @@ pub async fn join_game(
 
     match result {
         Ok(joined_game_id) => {
-            let games = house.live_games.lock().unwrap();
-            let game = match games.get(&joined_game_id) {
-                Some(g) => g,
-                None => {
-                    return Json(GameResponse::error("Game not found after join".to_string()));
-                }
-            };
-            let state = build_game_state_update(game, Some(&inner_request.player_id));
+            let state = {
+                let games = house.live_games.lock().unwrap();
+                let game = match games.get(&joined_game_id) {
+                    Some(g) => g,
+                    None => {
+                        return Json(GameResponse::error("Game not found after join".to_string()));
+                    }
+                };
+                build_game_state_update(game, Some(&inner_request.player_id))
+            }; // games lock released
+            house.broadcast_game_state(&joined_game_id);
             let message = format!("Successfully joined game {}", joined_game_id);
             Json(GameResponse {
                 success: true,
@@ -368,12 +400,11 @@ pub async fn leave_game(
 
     match house.remove_player(&game_id, player_id) {
         Ok(_) => {
-            // Get updated game state to notify remaining players
-            let games = house.live_games.lock().unwrap();
-            let game_state = games.get(&game_id).map(|game| {
-                build_game_state_update(game, None)
-            });
-            
+            let game_state = {
+                let games = house.live_games.lock().unwrap();
+                games.get(&game_id).map(|game| build_game_state_update(game, None))
+            }; // games lock released
+            house.broadcast_game_state(&game_id);
             let message = format!("Left game {}", game_id);
             Json(GameResponse {
                 success: true,
@@ -401,20 +432,19 @@ pub async fn start_hand(
         Err(_) => return Json(GameResponse::error("Invalid player_id".to_string())),
     };
 
-    let mut games = house.live_games.lock().unwrap();
-    let game = match games.get_mut(&game_id) {
-        Some(g) => g,
-        None => return Json(GameResponse::error("Game not found".to_string())),
-    };
+    let outcome: Result<GameStateUpdate, String> = {
+        let mut games = house.live_games.lock().unwrap();
+        let game = match games.get_mut(&game_id) {
+            Some(g) => g,
+            None => return Json(GameResponse::error("Game not found".to_string())),
+        };
+        game.start_hand().map(|()| build_game_state_update(game, Some(&player_id_str)))
+    }; // games lock released
 
-    match game.start_hand() {
-        Ok(()) => {
-            let state = build_game_state_update(game, Some(&player_id_str));
-            Json(GameResponse::success(
-                "Hand started".to_string(),
-                game_id,
-                state,
-            ))
+    match outcome {
+        Ok(state) => {
+            house.broadcast_game_state(&game_id);
+            Json(GameResponse::success("Hand started".to_string(), game_id, state))
         }
         Err(e) => Json(GameResponse::error(e)),
     }
@@ -459,35 +489,33 @@ pub async fn perform_action(
         return Json(GameResponse::error("game_id in URL and body must match".to_string()));
     }
 
-    let mut games = house.live_games.lock().unwrap();
-    let game = match games.get_mut(&game_id) {
-        Some(g) => g,
-        None => return Json(GameResponse::error("Game not found".to_string())),
-    };
+    let outcome: Result<GameStateUpdate, String> = {
+        let mut games = house.live_games.lock().unwrap();
+        let game = match games.get_mut(&game_id) {
+            Some(g) => g,
+            None => return Json(GameResponse::error("Game not found".to_string())),
+        };
+        let result = match game.get_game_type() {
+            poker_core::GameType::FiveCardDraw => match &inner.action {
+                GameAction::Fold => handle_fold(game, player_id),
+                GameAction::Check => handle_check(game, player_id),
+                GameAction::Call => handle_call(game, player_id),
+                GameAction::Bet { amount } => handle_bet(game, player_id, *amount),
+                GameAction::Raise { amount } => handle_raise(game, player_id, *amount),
+                GameAction::Draw { discard_indices } => handle_draw(game, player_id, discard_indices.clone()),
+                GameAction::AllIn => Err("AllIn not supported for Five Card Draw".to_string()),
+            },
+            poker_core::GameType::SevenCardStud | poker_core::GameType::TexasHoldEm => {
+                game.handle_action(player_id, inner.action.clone())
+            }
+        };
+        result.map(|()| build_game_state_update(game, Some(&inner.player_id)))
+    }; // games lock released
 
-    let result = match game.get_game_type() {
-        poker_core::GameType::FiveCardDraw => match &inner.action {
-            GameAction::Fold => handle_fold(game, player_id),
-            GameAction::Check => handle_check(game, player_id),
-            GameAction::Call => handle_call(game, player_id),
-            GameAction::Bet { amount } => handle_bet(game, player_id, *amount),
-            GameAction::Raise { amount } => handle_raise(game, player_id, *amount),
-            GameAction::Draw { discard_indices } => handle_draw(game, player_id, discard_indices.clone()),
-            GameAction::AllIn => Err("AllIn not supported for Five Card Draw".to_string()),
-        },
-        poker_core::GameType::SevenCardStud | poker_core::GameType::TexasHoldEm => {
-            game.handle_action(player_id, inner.action.clone())
-        }
-    };
-
-    match result {
-        Ok(()) => {
-            let state = build_game_state_update(game, Some(&inner.player_id));
-            Json(GameResponse::success(
-                "Action applied".to_string(),
-                game_id,
-                state,
-            ))
+    match outcome {
+        Ok(state) => {
+            house.broadcast_game_state(&game_id);
+            Json(GameResponse::success("Action applied".to_string(), game_id, state))
         }
         Err(e) => Json(GameResponse::error(e)),
     }
@@ -643,6 +671,27 @@ pub async fn register_viewer(
     _request: Json<poker_core::ViewerRequest>,
 ) -> Json<ServerResponse> {
     Json(ServerResponse::success("Viewer registered"))
+}
+
+/// SSE endpoint — browser connects once and receives a push event after every
+/// game-state change (join, start hand, action, leave).
+/// Each event payload is a JSON-serialised `GameStateUpdate` (public view, no private cards).
+#[get("/games/<game_id>/events")]
+pub async fn game_events(game_id: String, house: &State<House>) -> EventStream![] {
+    let rx = house.event_senders.lock().unwrap()
+        .get(&game_id)
+        .map(|tx| tx.subscribe());
+    EventStream! {
+        if let Some(mut rx) = rx {
+            loop {
+                match rx.recv().await {
+                    Ok(data) => yield Event::data(data),
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+        }
+    }
 }
 
 // ============================================================================
