@@ -794,6 +794,11 @@ fn build_game_state_update(game: &Game, player_id: Option<&str>) -> GameStateUpd
 ///
 /// PlayerInfo hides the player's actual cards and only shows card count.
 fn player_to_info(player: &Player, is_dealer: bool) -> PlayerInfo {
+    let face_up_cards = player.hand.cards().iter()
+        .filter(|c| c.card_type == poker_core::CardType::Up)
+        .map(|c| c.to_string())
+        .collect();
+
     PlayerInfo {
         username: player.username.clone(),
         chips: player.chips,
@@ -801,6 +806,7 @@ fn player_to_info(player: &Player, is_dealer: bool) -> PlayerInfo {
         folded: player.is_folded,
         is_dealer,
         cards_count: player.hand.len(),
+        face_up_cards,
     }
 }
 

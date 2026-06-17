@@ -170,6 +170,7 @@ pub struct PlayerInfo {
     pub folded: bool,
     pub is_dealer: bool,
     pub cards_count: usize, // Number of cards (actual cards hidden)
+    pub face_up_cards: Vec<String>,
 }
 
 /// Player statistics response.

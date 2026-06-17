@@ -255,12 +255,19 @@ pub fn display_game_state(state: &GameStateUpdate, _my_player_id: &str) {
             ""
         };
 
+        let face_up_str = if !player.face_up_cards.is_empty() {
+            format!(" | Visible: [{}]", player.face_up_cards.join(" "))
+        } else {
+            "".to_string()
+        };
+
         println!(
-            "  {} - Chips: ${} | Bet: ${} | Cards: {}{}{}{}",
+            "  {} - Chips: ${} | Bet: ${} | Cards: {}{}{}{}{}",
             player.username,
             player.chips,
             player.current_bet,
             player.cards_count,
+            face_up_str,
             dealer_mark,
             folded_mark,
             action_mark
