@@ -856,7 +856,7 @@ impl SevenCardStud {
                         None => lowest = Some((r_val, s_val, p.id)),
 
                         Some((low_r, low_s, _)) => {
-                            if (r_val < low_r || (low_r == r_val && s_val < low_s)) {
+                            if r_val < low_r || (low_r == r_val && s_val < low_s) {
                                 lowest = Some((r_val, s_val, p.id));
                             }
                         }
