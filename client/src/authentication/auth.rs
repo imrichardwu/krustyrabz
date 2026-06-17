@@ -72,12 +72,12 @@ struct AuthError {
     error: Option<String>,
 }
 
-/// Register a new user with Supabase Auth
-/// 
+/// Internal helper to register a new user with Supabase Auth
+///
 /// # Returns
 /// - `Ok(AuthSession)` on success
 /// - `Err(String)` with error message on failure
-pub async fn register() -> Result<AuthSession, String> {
+pub async fn register_helper(email: &str, username: &str, password: &str) -> Result<AuthSession, String> {
     ensure_dotenv_loaded();
 
     // Get Supabase URL and anon key from environment
@@ -86,35 +86,19 @@ pub async fn register() -> Result<AuthSession, String> {
     
     let supabase_key = env::var("SUPABASE_KEY")
         .map_err(|_| "SUPABASE_KEY not found in .env file")?;
-    
-    // Get user input
-    println!("Enter email:");
-    let mut email = String::new();
-    io::stdin().read_line(&mut email).expect("Failed to read line");
-    let email = email.trim().to_string();
-    
-    println!("Enter password (min 6 characters):");
-    let mut password = String::new();
-    io::stdin().read_line(&mut password).expect("Failed to read line");
-    let password = password.trim().to_string();
-    
+            
     if password.len() < 6 {
         return Err("Password must be at least 6 characters long".to_string());
     }
-    
-    println!("Enter username:");
-    let mut username = String::new();
-    io::stdin().read_line(&mut username).expect("Failed to read line");
-    let username = username.trim().to_string();
-    
+        
     // Use regular signup endpoint (email confirmation disabled in Supabase settings)
     let signup_url = format!("{}/auth/v1/signup", supabase_url);
     
     let request_body = serde_json::json!({
         "email": email.clone(),
-        "password": password,
+        "password": password.clone(),
         "data": {
-            "username": username
+            "username": username.clone()
         }
     });
     
@@ -130,7 +114,7 @@ pub async fn register() -> Result<AuthSession, String> {
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
-    println!("{:#?}", response); 
+    
     let status = response.status();
     let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
     
@@ -243,22 +227,11 @@ async fn login_with_credentials(email: &str, password: &str) -> Result<AuthSessi
 /// # Returns
 /// - `Ok(AuthSession)` on success
 /// - `Err(String)` with error message on failure
-pub async fn login() -> Result<AuthSession, String> {
+pub async fn login_helper(username: &str, password: &str, email: &str) -> Result<AuthSession, String> {
     ensure_dotenv_loaded();
     
-    // Get user input
-    println!("Enter email:");
-    let mut email = String::new();
-    io::stdin().read_line(&mut email).expect("Failed to read line");
-    let email = email.trim().to_string();
-    
-    println!("Enter password:");
-    let mut password = String::new();
-    io::stdin().read_line(&mut password).expect("Failed to read line");
-    let password = password.trim().to_string();
-    
     // Use the helper function
-    let session = login_with_credentials(&email, &password).await?;
+    let session = login_with_credentials(email, password).await?;
 
     // Ensure UserAccount row exists (so create_game / join_game can find the user)
     if let Ok(user_uuid) = Uuid::parse_str(&session.user_id) {
@@ -269,7 +242,6 @@ pub async fn login() -> Result<AuthSession, String> {
         }
     }
 
-    println!("User '{}' logged in successfully!", session.username);
     Ok(session)
 }
 
