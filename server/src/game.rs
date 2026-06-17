@@ -2,7 +2,7 @@ use crate::betting::{BettingRound, BettingState};
 use crate::deck::Deck;
 use crate::player::Player;
 use crate::table::Table;
-use poker_core::{Card, CardType, DeckTrait, GameType, GameStatus};
+use poker_core::{Card, CardType, DeckTrait, GameStatus, GameType};
 use strum_macros::Display;
 use uuid::Uuid;
 
@@ -14,7 +14,7 @@ pub struct SharedGameState {
 
     // Core Game
     pub dealer_idx: usize,
-    pub action_on: Option<Uuid>,  
+    pub action_on: Option<Uuid>,
 
     // Shared Betting Data
     pub betting_state: BettingState,
@@ -332,47 +332,35 @@ impl Game {
             Game::TexasHoldEm(game) => game.core.table.get_player_count(),
         }
     }
-    pub fn get_players(&self) -> Vec<Player> { 
-        match self { 
-            Game::FiveCardDraw(game) => 
-                game.core.table.players.clone(), 
-            Game::SevenCardStud(game) => 
-                game.core.table.players.clone(), 
-            Game::TexasHoldEm(game) => 
-                game.core.table.players.clone(), 
+    pub fn get_players(&self) -> Vec<Player> {
+        match self {
+            Game::FiveCardDraw(game) => game.core.table.players.clone(),
+            Game::SevenCardStud(game) => game.core.table.players.clone(),
+            Game::TexasHoldEm(game) => game.core.table.players.clone(),
         }
     }
 
     pub fn get_betting_state(&self) -> BettingState {
-        match self { 
-            Game::FiveCardDraw(game) => 
-                game.core.betting_state.clone(), 
-            Game::SevenCardStud(game) => 
-                game.core.betting_state.clone(), 
-            Game::TexasHoldEm(game) => 
-                game.core.betting_state.clone(), 
+        match self {
+            Game::FiveCardDraw(game) => game.core.betting_state.clone(),
+            Game::SevenCardStud(game) => game.core.betting_state.clone(),
+            Game::TexasHoldEm(game) => game.core.betting_state.clone(),
         }
     }
 
     pub fn get_betting_round(&self) -> BettingRound {
-        match self { 
-            Game::FiveCardDraw(game) => 
-                game.betting_round.clone(), 
-            Game::SevenCardStud(game) => 
-                game.betting_round.clone(), 
-            Game::TexasHoldEm(game) => 
-                game.betting_round.clone(), 
+        match self {
+            Game::FiveCardDraw(game) => game.betting_round.clone(),
+            Game::SevenCardStud(game) => game.betting_round.clone(),
+            Game::TexasHoldEm(game) => game.betting_round.clone(),
         }
     }
 
-    pub fn get_action_on(&self) -> Option<Uuid> { 
-        match self { 
-            Game::FiveCardDraw(game) => 
-                game.core.action_on.clone(), 
-            Game::SevenCardStud(game) => 
-                game.core.action_on.clone(), 
-            Game::TexasHoldEm(game) => 
-                game.core.action_on.clone(), 
+    pub fn get_action_on(&self) -> Option<Uuid> {
+        match self {
+            Game::FiveCardDraw(game) => game.core.action_on.clone(),
+            Game::SevenCardStud(game) => game.core.action_on.clone(),
+            Game::TexasHoldEm(game) => game.core.action_on.clone(),
         }
     }
 
@@ -473,39 +461,43 @@ impl Game {
         }
     }
 
-    pub fn is_empty(&self) -> bool { 
-        match self { 
-            Game::FiveCardDraw(game) => game.core.table.is_empty(), 
-            Game::SevenCardStud(game) => game.core.table.is_empty(), 
-            Game::TexasHoldEm(game) => game.core.table.is_empty(), 
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Game::FiveCardDraw(game) => game.core.table.is_empty(),
+            Game::SevenCardStud(game) => game.core.table.is_empty(),
+            Game::TexasHoldEm(game) => game.core.table.is_empty(),
         }
     }
 
     pub fn add_player(&mut self, player: Player) -> Result<(), String> {
         match self {
-            Game::FiveCardDraw(game) => {
-                game.core.table.seat_player(player)
-                    .map_err(|e| e.to_string())
-            }
-            Game::SevenCardStud(game) => {
-                game.core.table.seat_player(player)
-                    .map_err(|e| e.to_string())
-            }
-            Game::TexasHoldEm(game) => {
-                game.core.table.seat_player(player)
-                    .map_err(|e| e.to_string())
-            }
+            Game::FiveCardDraw(game) => game
+                .core
+                .table
+                .seat_player(player)
+                .map_err(|e| e.to_string()),
+            Game::SevenCardStud(game) => game
+                .core
+                .table
+                .seat_player(player)
+                .map_err(|e| e.to_string()),
+            Game::TexasHoldEm(game) => game
+                .core
+                .table
+                .seat_player(player)
+                .map_err(|e| e.to_string()),
         }
     }
 
     pub fn remove_player(&mut self, player_id: Uuid) -> Result<(), String> {
         match self {
             Game::FiveCardDraw(game) => {
-                game.core.table.remove_player_from_table(player_id)
+                game.core
+                    .table
+                    .remove_player_from_table(player_id)
                     .map_err(|e| e.to_string())?;
                 // If a hand is in progress and only 1 player remains, that player auto-wins.
-                if game.betting_round != BettingRound::PreDeal
-                    && game.core.table.players.len() == 1
+                if game.betting_round != BettingRound::PreDeal && game.core.table.players.len() == 1
                 {
                     let winner_id = game.core.table.players[0].id;
                     let winner_name = game.core.table.players[0].username.clone();
@@ -521,10 +513,11 @@ impl Game {
                 Ok(())
             }
             Game::SevenCardStud(game) => {
-                game.core.table.remove_player_from_table(player_id)
+                game.core
+                    .table
+                    .remove_player_from_table(player_id)
                     .map_err(|e| e.to_string())?;
-                if game.betting_round != BettingRound::PreDeal
-                    && game.core.table.players.len() == 1
+                if game.betting_round != BettingRound::PreDeal && game.core.table.players.len() == 1
                 {
                     let winner_id = game.core.table.players[0].id;
                     let pot_amount = game.core.pot;
@@ -538,10 +531,11 @@ impl Game {
                 Ok(())
             }
             Game::TexasHoldEm(game) => {
-                game.core.table.remove_player_from_table(player_id)
+                game.core
+                    .table
+                    .remove_player_from_table(player_id)
                     .map_err(|e| e.to_string())?;
-                if game.betting_round != BettingRound::PreDeal
-                    && game.core.table.players.len() == 1
+                if game.betting_round != BettingRound::PreDeal && game.core.table.players.len() == 1
                 {
                     let winner_id = game.core.table.players[0].id;
                     let pot_amount = game.core.pot;
@@ -624,7 +618,11 @@ impl FiveCardDraw {
 
         // Check if only one player remains (everyone else folded/left)
         if self.core.count_active_players() == 1 {
-            let active_players: Vec<_> = self.core.table.players.iter()
+            let active_players: Vec<_> = self
+                .core
+                .table
+                .players
+                .iter()
                 .filter(|p| !p.is_folded)
                 .collect();
 
@@ -632,11 +630,11 @@ impl FiveCardDraw {
                 let winner_id = winner.id;
                 let winner_name = winner.username.clone();
                 let pot_amount = self.core.pot;
-                
+
                 if let Some(player) = self.core.table.get_player_mut(winner_id) {
                     player.chips += pot_amount;
                 }
-                
+
                 // Set showdown message and reset
                 self.last_showdown = Some(vec![(winner_name, pot_amount)]);
                 self.core.pot = 0;
@@ -667,7 +665,11 @@ impl FiveCardDraw {
 
         // Check if only one player remains (everyone else folded/left)
         if self.core.count_active_players() == 1 {
-            let active_players: Vec<_> = self.core.table.players.iter()
+            let active_players: Vec<_> = self
+                .core
+                .table
+                .players
+                .iter()
                 .filter(|p| !p.is_folded)
                 .collect();
 
@@ -675,11 +677,11 @@ impl FiveCardDraw {
                 let winner_id = winner.id;
                 let winner_name = winner.username.clone();
                 let pot_amount = self.core.pot;
-                
+
                 if let Some(player) = self.core.table.get_player_mut(winner_id) {
                     player.chips += pot_amount;
                 }
-                
+
                 // Set showdown message and reset
                 self.last_showdown = Some(vec![(winner_name, pot_amount)]);
                 self.core.pot = 0;
@@ -829,6 +831,75 @@ impl SevenCardStud {
         }
     }
 
+    fn get_suit_val(suit: poker_core::Suit) -> u8 {
+        match suit {
+            poker_core::Suit::Clubs => 1,
+            poker_core::Suit::Diamonds => 2,
+            poker_core::Suit::Hearts => 3,
+            poker_core::Suit::Spades => 4,
+        }
+    }
+
+    fn find_lowest(&self) -> Option<Uuid> {
+        let mut lowest: Option<(u8, u8, Uuid)> = None;
+
+        for p in &self.core.table.players {
+            if p.is_folded {
+                continue;
+            }
+            for c in p.hand.cards() {
+                if c.card_type == poker_core::CardType::Up {
+                    let r_val = c.rank as u8;
+                    let s_val = Self::get_suit_val(c.suit);
+
+                    match lowest {
+                        None => lowest = Some((r_val, s_val, p.id)),
+
+                        Some((low_r, low_s, _)) => {
+                            if (r_val < low_r || (low_r == r_val && s_val < low_s)) {
+                                lowest = Some((r_val, s_val, p.id));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        lowest.map(|(_, _, id)| id)
+    }
+
+    fn eval_best_showing_hand(&self) -> Option<Uuid> {
+        let mut best_id = None;
+        let mut best_rank: Option<poker_core::hand::HandRank> = None;
+
+        for p in &self.core.table.players {
+            if p.is_folded {
+                continue;
+            }
+
+            let mut up_hand = poker_core::hand::Hand::new();
+            for c in p.hand.cards() {
+                if c.card_type == poker_core::CardType::Up {
+                    up_hand.add(*c);
+                }
+            }
+
+            let rank = up_hand.evaluate();
+            match best_rank {
+                None => {
+                    best_rank = Some(rank);
+                    best_id = Some(p.id);
+                }
+                Some(ref current) => {
+                    if rank > *current {
+                        best_rank = Some(rank);
+                        best_id = Some(p.id);
+                    }
+                }
+            }
+        }
+        best_id
+    }
+
     /// Deals 2 private cards + 1 face-up card to each player and starts Third Street.
     pub fn start_hand(&mut self) -> Result<(), String> {
         if self.betting_round != BettingRound::PreDeal {
@@ -853,10 +924,12 @@ impl SevenCardStud {
         }
 
         self.betting_round = BettingRound::ThirdStreet;
-        self.core.action_on = None;
-        if !self.core.advance_action(false) {
-            return Err("no_active_players".to_string());
+
+        self.core.action_on = self.find_lowest();
+        if self.core.action_on.is_none() {
+            return Err("no_up_cards_found".to_string());
         }
+        
         Ok(())
     }
 
@@ -916,8 +989,10 @@ impl SevenCardStud {
         }
 
         self.betting_round = next_round;
-        self.core.action_on = None;
-        if !self.core.advance_action(false) {
+
+        self.core.action_on = self.eval_best_showing_hand();
+
+        if self.core.action_on.is_none() {
             self.transition_to_showdown();
         }
     }
@@ -1148,5 +1223,243 @@ impl TexasHoldEm {
         self.community_cards.clear();
         self.core.reset_for_new_hand();
         self.betting_round = BettingRound::PreDeal;
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use poker_core::protocol::GameAction;
+    use poker_core::{Card, CardType, Rank, Suit};
+    use uuid::Uuid;
+
+    // ========================================================================
+    // Helpers
+    // ========================================================================
+
+    fn mock_player(name: &str, chips: u32) -> Player {
+        Player {
+            id: Uuid::new_v4(),
+            username: name.to_string(),
+            chips,
+            hand: poker_core::hand::Hand::new(),
+            is_folded: false,
+            game_id: Default::default(),
+            current_bet: 0,
+        }
+    }
+
+    // ========================================================================
+    // SharedGameState Engine Tests
+    // ========================================================================
+
+    #[test]
+    fn test_shared_state_betting_validation() {
+        let mut core = SharedGameState::new(5);
+        let mut p1 = mock_player("Alice", 100);
+        let mut p2 = mock_player("Bob", 100);
+        let id1 = p1.id;
+        let id2 = p2.id;
+
+        core.table.seat_player(p1).unwrap();
+        core.table.seat_player(p2).unwrap();
+        core.action_on = Some(id1);
+        core.betting_state.min_raise = 10;
+
+        // P1 Cannot check if there is a bet to call (simulated by artificially setting to_call)
+        core.betting_state.to_call = 10;
+        let check_err = core.process_betting_action(id1, GameAction::Check);
+        assert!(check_err.is_err());
+        assert_eq!(check_err.unwrap_err(), "cannot_check_must_call");
+
+        // P1 Calls the 10
+        assert!(core.process_betting_action(id1, GameAction::Call).is_ok());
+        assert_eq!(core.table.get_player_mut(id1).unwrap().chips, 90);
+        assert_eq!(core.pot, 10);
+
+        // Action moved to P2. P2 tries to bet instead of raise
+        let bet_err = core.process_betting_action(id2, GameAction::Bet { amount: 20 });
+        assert!(bet_err.is_err());
+        assert_eq!(bet_err.unwrap_err(), "cannot_bet_must_raise");
+
+        // P2 correctly raises to 30
+        assert!(
+            core.process_betting_action(id2, GameAction::Raise { amount: 30 })
+                .is_ok()
+        );
+        assert_eq!(core.pot, 40); // 10 from P1 + 30 from P2
+    }
+
+    #[test]
+    fn test_shared_state_split_pot() {
+        let mut core = SharedGameState::new(5);
+        let mut p1 = mock_player("Alice", 0);
+        let mut p2 = mock_player("Bob", 0);
+        let mut p3 = mock_player("Charlie", 0);
+
+        // Give P1 and P2 the exact same hand (Pair of Aces)
+        p1.hand
+            .add(Card::construct(Rank::Ace, Suit::Spades, CardType::Private));
+        p1.hand
+            .add(Card::construct(Rank::Ace, Suit::Hearts, CardType::Private));
+
+        p2.hand
+            .add(Card::construct(Rank::Ace, Suit::Clubs, CardType::Private));
+        p2.hand.add(Card::construct(
+            Rank::Ace,
+            Suit::Diamonds,
+            CardType::Private,
+        ));
+
+        // P3 gets a worse hand (High card King)
+        p3.hand
+            .add(Card::construct(Rank::King, Suit::Spades, CardType::Private));
+        p3.hand
+            .add(Card::construct(Rank::Two, Suit::Hearts, CardType::Private));
+
+        let id1 = p1.id;
+        let id2 = p2.id;
+
+        core.table.seat_player(p1).unwrap();
+        core.table.seat_player(p2).unwrap();
+        core.table.seat_player(p3).unwrap();
+        core.pot = 101; // Odd pot to test remainder distribution
+
+        let results = core.resolve_showdown();
+
+        // Should only have 2 winners
+        assert_eq!(results.len(), 2);
+
+        // Pot is 101. Split is 50 each. Remainder 1 goes to first winner.
+        let p1_chips = core.table.get_player_mut(id1).unwrap().chips;
+        let p2_chips = core.table.get_player_mut(id2).unwrap().chips;
+
+        assert_eq!(p1_chips + p2_chips, 101);
+        assert!(p1_chips == 50 || p1_chips == 51);
+    }
+
+    // ========================================================================
+    // Five Card Draw Tests
+    // ========================================================================
+
+    // Could add these if we really wanted to.
+
+    // ========================================================================
+    // Seven Card Stud Tests
+    // ========================================================================
+
+    #[test]
+    fn test_seven_card_stud_rotation_rules() {
+        let mut game = SevenCardStud::new();
+        let mut p1 = mock_player("Alice", 100);
+        let mut p2 = mock_player("Bob", 100);
+
+        // Alice: 2 spades (higher suit), Bob: 2 clubs(lower suit)
+        p1.hand
+            .add(Card::construct(Rank::Two, Suit::Spades, CardType::Up));
+        p2.hand
+            .add(Card::construct(Rank::Two, Suit::Clubs, CardType::Up));
+
+        let id_alice = p1.id;
+        let id_bob = p2.id;
+
+        game.core.table.seat_player(p1).unwrap();
+        game.core.table.seat_player(p2).unwrap();
+
+        // On 3rd street, lowest upcard goes first (bring-in)
+        let action_uid = game.find_lowest();
+        assert_eq!(action_uid, Some(id_bob));
+
+        // Simulate 4th street by improving Alice's visible hand
+        game.core
+            .table
+            .get_player_mut(id_alice)
+            .unwrap()
+            .hand
+            .add(Card::construct(Rank::Two, Suit::Hearts, CardType::Up));
+        game.core
+            .table
+            .get_player_mut(id_bob)
+            .unwrap()
+            .hand
+            .add(Card::construct(Rank::Three, Suit::Diamonds, CardType::Up));
+
+        // Now Alice shows a pair, so she should act first
+        let action_uid_4th = game.eval_best_showing_hand();
+        assert_eq!(action_uid_4th, Some(id_alice));
+    }
+
+    // ========================================================================
+    // Texas Hold'em Tests
+    // ========================================================================
+
+    #[test]
+    fn test_texas_holdem_community_state_machine() {
+        let mut game = TexasHoldEm::new();
+
+        // Seating order matters for blinds and action
+        let p1 = mock_player("Alice", 1000); // Dealer / UTG
+        let p2 = mock_player("Bob", 1000); // Small blind
+        let p3 = mock_player("Charlie", 1000); // Big blind
+
+        let id1 = p1.id;
+        let id2 = p2.id;
+        let id3 = p3.id;
+
+        game.core.table.seat_player(p1).unwrap();
+        game.core.table.seat_player(p2).unwrap();
+        game.core.table.seat_player(p3).unwrap();
+
+        // Start hand to blinds posted, cards dealt
+        assert!(game.start_hand().is_ok());
+        assert_eq!(game.betting_round, BettingRound::PreFlop);
+        assert_eq!(game.core.pot, 15);
+
+        // First action is UTG (left of big blind)
+        assert_eq!(game.core.action_on, Some(id1));
+
+        assert!(game.handle_action(id1, GameAction::Call).is_ok());
+
+        // Small blind needs to complete to match big blind
+        assert_eq!(game.core.action_on, Some(id2));
+
+        // In this engine, once SB calls, round ends immediately
+        assert!(game.handle_action(id2, GameAction::Call).is_ok());
+
+        assert_eq!(game.betting_round, BettingRound::Flop);
+        assert_eq!(game.community_cards.len(), 3);
+        assert_eq!(game.core.pot, 30);
+
+        // Post-flop starts from small blind
+        assert_eq!(game.core.action_on, Some(id2));
+
+        assert!(
+            game.handle_action(id2, GameAction::Bet { amount: 50 })
+                .is_ok()
+        );
+        assert!(game.handle_action(id3, GameAction::Fold).is_ok());
+        assert!(game.handle_action(id1, GameAction::Call).is_ok());
+
+        assert_eq!(game.betting_round, BettingRound::Turn);
+        assert_eq!(game.community_cards.len(), 4);
+
+        assert_eq!(game.core.action_on, Some(id2));
+        assert!(game.handle_action(id2, GameAction::Check).is_ok());
+        assert!(game.handle_action(id1, GameAction::Check).is_ok());
+
+        // River dealt
+        assert_eq!(game.betting_round, BettingRound::River);
+        assert_eq!(game.community_cards.len(), 5);
+
+        // Double check to showdown
+        assert!(game.handle_action(id2, GameAction::Check).is_ok());
+        assert!(game.handle_action(id1, GameAction::Check).is_ok());
+
+        // After showdown, everything should be reset
+        assert_eq!(game.betting_round, BettingRound::PreDeal);
+        assert_eq!(game.community_cards.len(), 0);
+        assert_eq!(game.core.pot, 0);
+        assert!(game.last_showdown.is_some());
     }
 }

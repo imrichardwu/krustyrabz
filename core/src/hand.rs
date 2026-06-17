@@ -84,7 +84,7 @@ impl Hand {
             return (counts, false, 0);
         }
 
-        let mut is_flush = true;
+        let mut is_flush = cards.len() >= 5;
         let first_suit = cards[0].suit;
         let mut rank_mask = 0u16;
 
@@ -103,7 +103,9 @@ impl Hand {
 
     pub fn evaluate(&self) -> HandRank {
         match self.len() {
-            5 => self.evaluate_5cards(self.cards.as_slice()),
+            0 => HandRank { category: HandCategory::HighCard, kickers: ArrayVec::new() },
+            
+            1..=5 => self.evaluate_5cards(self.cards.as_slice()),
 
             7 => {
                 let mut best_rank: Option<HandRank> = None;

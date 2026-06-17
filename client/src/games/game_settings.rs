@@ -15,13 +15,7 @@ pub async fn create_and_play_game(
     session: &AuthSession,
     game_type: GameType,
 ) -> Result<(), ApiError> {
-    if game_type != GameType::FiveCardDraw {
-        return Err(ApiError::Server(
-            "Only Five Card Draw is supported for now.".to_string(),
-        ));
-    }
-
-    println!("\nCreating new Five Card Draw game...");
+    println!("\nCreating new {} game...", game_type);
 
     let response = client
         .create_game(&session.user_id, &session.username, game_type)
@@ -45,9 +39,6 @@ pub async fn join_and_play_game(
     game_id: &str,
     game_type: GameType,
 ) -> Result<(), ApiError> {
-    if game_type != GameType::FiveCardDraw {
-        println!("Note: Only Five Card Draw actions are supported; you may see errors for other game types.");
-    }
     println!("\nJoining game {}...", game_id);
 
     let response = client
@@ -116,15 +107,21 @@ pub async fn game_loop(
         }
 
         // Show action menu (only offer actions that are valid this turn/phase)
-        let is_betting_phase = matches!(
+        let hand_not_started = state.your_hand.is_empty();
+
+        // If it's not Drawing or Showdown, AND the hand has actually started, it's a live betting street
+        let is_betting_phase = !matches!(
             state.betting_round,
-            BettingRound::PreDraw | BettingRound::PostDraw
-        );
+            BettingRound::Drawing | BettingRound::Showdown
+        ) && !hand_not_started;
+        
         let is_draw_phase = state.betting_round == BettingRound::Drawing;
         let is_my_turn = state.action_on.as_deref() == Some(session.username.as_str());
 
+        // Any game can start if cards haven't been dealt and there are enough players
+        let can_start_hand = hand_not_started && state.player_count >= 2;
+
         println!("\n=== Actions ===");
-        let can_start_hand = has_draw_phase && state.your_hand.is_empty() && state.player_count >= 2;
         if can_start_hand {
             println!("9. Start hand (deal cards, need 2+ players)");
         }
@@ -241,6 +238,11 @@ pub fn display_game_state(state: &GameStateUpdate, _my_player_id: &str) {
     println!("  GAME: {} | POT: ${}", state.game_id, state.pot);
     println!("  Round: {} | Current Bet: ${}", state.betting_round, state.current_bet);
     println!("{}", "=".repeat(60));
+
+    if !state.community_cards.is_empty() {
+        println!("\n--- Community Cards ---");
+        println!("  {}", state.community_cards.join("  "));
+    }
 
     // Display players
     println!("\n--- Players ---");
