@@ -124,7 +124,7 @@ pub async fn register_helper(email: &str, username: &str, password: &str) -> Res
         let access_token: String = auth_response.access_token.ok_or_else(|| "Registration response missing access token".to_string())?;
         let refresh_token: String = auth_response.refresh_token.ok_or_else(|| "Registration response missing refresh token".to_string())?;
 
-        let session_username = auth_response.user.user_metadata.and_then(|m| m.get("username").and_then(|v| v.as_str().map(|s| s.to_string()))) .unwrap_or_else(|| username.clone());
+        let session_username = auth_response.user.user_metadata.and_then(|m| m.get("username").and_then(|v| v.as_str().map(|s| s.to_string()))) .unwrap_or_else(|| username.to_string());
 
         // Create user in app database (UserAccount table) so the server can find you when creating/joining games
         let user_id = auth_response.user.id.parse::<Uuid>()
@@ -235,7 +235,7 @@ pub async fn login_helper(username: &str, password: &str, email: &str) -> Result
 
     // Ensure UserAccount row exists (so create_game / join_game can find the user)
     if let Ok(user_uuid) = Uuid::parse_str(&session.user_id) {
-        if let Ok(repo) = Repository::new().await {
+        if let Some(repo) = Repository::new().await.ok() {
             if repo.get_user_by_id(user_uuid).await.is_err() {
                 let _ = repo.create_user(session.username.clone(), user_uuid).await;
             }
@@ -336,7 +336,7 @@ pub async fn mock_login(email: String, password: String) -> Result<AuthSession, 
 
     // Ensure UserAccount row exists (so create_game / join_game can find the user)
     if let Ok(user_uuid) = Uuid::parse_str(&session.user_id) {
-        if let Ok(repo) = Repository::new().await {
+        if let Some(repo) = Repository::new().await.ok() {
             if repo.get_user_by_id(user_uuid).await.is_err() {
                 let _ = repo.create_user(session.username.clone(), user_uuid).await;
             }

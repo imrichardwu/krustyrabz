@@ -6,192 +6,205 @@ mod player;
 
 use crate::api::PokerClient;
 use games::game_settings;
-use authentication::{login, register, AuthSession};
-use viewer::watch_game;
+use authentication::{AuthSession, login_helper, register_helper};
+use rocket::form::Form;
 use poker_core::{GameType, GameStatus};
-use client::{PokerClient, read_input};
-use rocket::State; 
-use rocket::fs::FileServer; 
-use std::sync::Arc; 
-use rocket::serde::json::Json; 
-use serde::Deserialize; 
-use maud::{html, Markup, DOCTYPE, Render}; 
+use rocket::State;
+use rocket::fs::FileServer;
+use std::sync::Arc;
+use rocket::serde::json::Json;
+use serde::Deserialize;
+use maud::{html, Markup, DOCTYPE, PreEscaped};
+use dashmap::DashMap;
 
 type SessionCache = DashMap<String, AuthSession>;
 
-#[macro_use] extern crate rocket; 
+#[derive(rocket::form::FromForm)]
+struct SignUpRequest {
+    email: String,
+    username: String,
+    password: String,
+}
 
-#[launch] 
+#[derive(rocket::form::FromForm)]
+struct LoginRequest {
+    email: String,
+    username: String,
+    password: String,
+}
+
+#[macro_use] extern crate rocket;
+
+#[launch]
 fn rocket() -> _ {
     let session_cache: SessionCache = DashMap::new();
-    let client = PokerClient::new(); 
+    let client = PokerClient::localhost();
 
-    rocket::build() 
-        .mount("/", routes![watch_game, 
-            list_and_join_games, 
+    rocket::build()
+        .mount("/", routes![
+            landing,
+            main_menu,
+            list_and_join_games_helper,
+            login_form,
+            register_form,
+            login,
+            register,
+            create_new_game,
+            watch_game,
             add_chips,
-            create_new_game])
+        ])
         .mount("/public", FileServer::from("../public"))
         .manage(Arc::new(session_cache))
         .manage(client)
 }
 
-fn layout(title: &str, content: Markup) -> Markup { 
-    html! { 
+fn layout(title: &str, content: Markup) -> Markup {
+    html! {
         (DOCTYPE)
             html {
-                head { 
-                    meta charset="utf-8" 
-                    title { (title) } 
-                    link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" {} 
-                    script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module" {} 
-                    script src="https://cdn.tailwindcss.com" {} 
-                    link rel="stylesheet" type="text/css" href="https://unpkg.com/cardsJS/dist/cards.min.css" { } 
-                    script src="https://unpkg.com/cardsJS/dist/cards.min.js" type="text/javascript" { } 
+                head {
+                    meta charset="utf-8" {}
+                    title { (title) }
+                    link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" {}
+                    script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module" {}
+                    script src="https://cdn.tailwindcss.com" {}
+                    link rel="stylesheet" type="text/css" href="https://unpkg.com/cardsJS/dist/cards.min.css" {}
+                    script src="https://unpkg.com/cardsJS/dist/cards.min.js" type="text/javascript" {}
                 }
-                script src="https://unpkg.com/htmx.org@2.0.0" {} 
-                body class = "bg-black text-white" style="font-family: 'Roboto', sans-serif;" {
-                    header { img src="../public/logo.png"; 
-                        main style="mt-500 mb-500" { (content) } 
+                script src="https://unpkg.com/htmx.org@2.0.0" {}
+                script { (PreEscaped("document.addEventListener('htmx:afterRequest',function(e){var t=e.detail.target;if(t&&t.tagName==='DIALOG')t.showModal();});")) }
+                body class="bg-black text-white" style="font-family: 'Roboto', sans-serif;" {
+                    header { img src="../public/logo.png" {}
+                        main style="mt-500 mb-500" { (content) }
+                    }
                 }
             }
-        }
     }
 }
 
-fn close_btn(target: &str) -> Markup { 
-    html! { 
-        button class="mb-8 px-2 py-1 bg-black text-white rounded" 
-            onclick=(format!("document.getElementById('{}').close()", target)) { "X" } 
+fn close_btn(target: &str) -> Markup {
+    html! {
+        button class="mb-8 px-2 py-1 bg-black text-white rounded"
+            onclick=(format!("document.getElementById('{}').close()", target)) { "X" }
     }
 }
 
-fn action_btn(target: &str, img: &str) -> Markup { 
-    html! { 
-        button class="mb-8 px-2 py-1 bg-black text-white rounded" 
-            onclick=(format!("document.getElementByid('{}').click()", target)) { img src= format!("../public/{}", img) } 
+fn action_btn(target: &str, img: &str) -> Markup {
+    html! {
+        button class="mb-8 px-2 py-1 bg-black text-white rounded"
+            onclick=(format!("document.getElementByid('{}').click()", target)) { img src=(format!("../public/{}", img)) {} }
     }
 }
 
-fn modal_content(title: &str, elId: &str, content: Markup) -> Markup {     
-    
-    html! { 
-        (close_btn(elId)) 
-            h2 class={"text-lg font-bold mb-4 "} { (title) } 
-        p { (content) } 
+fn modal_content(title: &str, elId: &str, content: Markup) -> Markup {
+    html! {
+        (close_btn(elId))
+            h2 class="text-lg font-bold mb-4" { (title) }
+        p { (content) }
     }
 }
 
-fn card(title: &str, ctls: Vec<Markup>) -> Markup { 
-    html! { 
-        h1 { (title) } 
-        div class="grid grid-cols-1 gap-4 mt-10" { {}
-            {
-                @for ctl in ctls {
-                    (ctl)
-                }
+fn card(title: &str, ctls: Vec<Markup>) -> Markup {
+    html! {
+        h1 { (title) }
+        div class="grid grid-cols-1 gap-4 mt-10" {
+            @for ctl in ctls {
+                (ctl)
             }
         }
     }
 }
 
 #[get("/main_menu?<id>")]
-async fn main_menu(id: &str, state: &State<Arc<SessionCache>>) { 
-    //need to verify session 
-    let verified = true; 
-    html! { 
-        dialog id="list-and-join-games" class="rounded p-6 backdrop:bg-black/50" { } 
-        dialog id="create-new-game" class="rounded p-6 backdrop:bg-black/50" { } 
-        dialog id="watch-game" class="rounded p-6 backdrop:bg-black/50" { } 
-        dialog id="add-chips" class="rounded p-6 backdrop:bg-black/50" { } 
+async fn main_menu(id: &str, state: &State<Arc<SessionCache>>) -> Markup {
+    //need to verify session
+    let verified = true;
+    layout("Main Menu", html! {
+        dialog id="list-and-join-games" class="rounded p-6 backdrop:bg-black/50" { }
+        dialog id="create-new-game" class="rounded p-6 backdrop:bg-black/50" { }
+        dialog id="watch-game" class="rounded p-6 backdrop:bg-black/50" { }
+        dialog id="add-chips" class="rounded p-6 backdrop:bg-black/50" { }
 
-        div class="hand hhand-compact active-hand" {  
-            form hx-get="/list_and_join_games" hx-target="#list-and-join-games" hx-swap="innerHTML" hx-on::after_request="document.getElementById('list-and-join-games').showModal();" class="pb-3 text-right" { 
-                button type="submit" name="card" value="AS" { 
-                    img class="card" src="cards/AS.svg" { } 
+        div class="hand hhand-compact active-hand" {
+            form hx-get="/list_and_join_games" hx-target="#list-and-join-games" hx-swap="innerHTML" class="pb-3 text-right" {
+                button type="submit" name="card" value="AS" {
+                    img class="card" src="cards/AS.svg" { }
                 }
             }
-            form hx-get="/create_new_game" hx-target="#create-new-game" hx-swap="innerHTML" hx-on::after-request="document.getElementById('create-new-game').showModal();" class="pb-3 text-right" { 
-                button type="submit" name="card" value="KS" { 
-                    img class="card" src="cards/KS.svg" { } 
+            form hx-get="/create_new_game" hx-target="#create-new-game" hx-swap="innerHTML" class="pb-3 text-right" {
+                button type="submit" name="card" value="KS" {
+                    img class="card" src="cards/KS.svg" { }
                 }
             }
-            form hx-get="/watch_game" hx-target="#watch-game" hx-swap="innerHTML" hx-on::after-request="document.getElementById('watch-game').showModal();" class="pb-3 text-right" { 
-                button type="submit" name="card" value="QS" { 
-                    img class="card" src="cards/QS.svg" { } 
+            form hx-get="/watch_game" hx-target="#watch-game" hx-swap="innerHTML" class="pb-3 text-right" {
+                button type="submit" name="card" value="QS" {
+                    img class="card" src="cards/QS.svg" { }
                 }
             }
-            form hx-get="/add_chips" hx-target="#add-chips" hx-swap="innerHTML" hx-on::after-request="document.getElementById('add-chips').showModal();" class="pb-3 text-right" { 
-                button type="submit" name="card" value="JS" { 
+            form hx-get="/add_chips" hx-target="#add-chips" hx-swap="innerHTML" class="pb-3 text-right" {
+                button type="submit" name="card" value="JS" {
                     img class="card" src="cards/JS.svg" { }
                 }
             }
-            form hx-get="/logout" hx-target="#" hx-swap="innerHTML" class="pb-3 text-right" { 
-                button type="submit" name="card" value="10S" { 
-                    img class="card" src="cards/10S.svg" 
+            form hx-get="/logout" hx-target="#" hx-swap="innerHTML" class="pb-3 text-right" {
+                button type="submit" name="card" value="10S" {
+                    img class="card" src="cards/10S.svg" {}
                 }
             }
-            form hx-get="/exit" hx-target="#" hx-swap="innerHTML" class="pb-3 text-right" { 
-                button type="submit" name="card" value="9H" { 
-                    img class="card" src="cards/9H.svg" 
+            form hx-get="/exit" hx-target="#" hx-swap="innerHTML" class="pb-3 text-right" {
+                button type="submit" name="card" value="9H" {
+                    img class="card" src="cards/9H.svg" {}
+                }
             }
         }
-    }
-} 
+    })
+}
 
-
-#[get("/list_and_join_games?<id>")] 
+#[get("/list_and_join_games?<id>")]
 async fn list_and_join_games_helper(client: &State<PokerClient>, id: String, state: &State<Arc<SessionCache>>) -> Markup {
 
-    let can_join: Markup = html! { 
-        form hx-post="/join_and_play_game" hx-target="#" hx-swap="innerHTML" class="pb-3 text-right" { 
-            button type="submit" name="join" value="join" class="text-green" { "PLAY NOW" }        
+    let can_join: Markup = html! {
+        form hx-post="/join_and_play_game" hx-target="#" hx-swap="innerHTML" class="pb-3 text-right" {
+            button type="submit" name="join" value="join" class="text-green" { "PLAY NOW" }
         }
-}; 
+    };
 
-    let cant_join: Markup = html! { 
-        text class="text-red" { "GAME FULL" } 
-    }; 
+    let cant_join: Markup = html! {
+        span class="text-red" { "GAME FULL" }
+    };
 
     // List all games
     match client.list_games().await {
         Ok(response) => {
-
-            html! { 
-                if response.games.is_empty() {
-                    let msg: Markup = html! { p { "No games available" } }; 
-                    return msg; 
-                }
-
-                h1 { "AVAILABLE GAMES" } 
-                table { 
-                    thead { 
-                        tr { 
-                            th { "Game ID" } 
-                            th { "Type"    } 
+            html! {
+                h1 { "AVAILABLE GAMES" }
+                table {
+                    thead {
+                        tr {
+                            th { "Game ID" }
+                            th { "Type"    }
                             th { "Players" }
-                            th { "Status"  } 
-                            th { "Join"    } 
+                            th { "Status"  }
+                            th { "Join"    }
                         }
                     }
-                    tbody { 
-                        @for (idx, game) in response.games.iter().enumerate() { 
-                            let status = match game.status { 
-                                GameStatus::WaitingForPlayers => "Waiting", 
-                                GameStatus::InProgress => "In Progress", 
-                                GameStatus::Finished => "Finished", 
-                            }; 
-                            tr { 
+                    tbody {
+                        @for game in response.games.iter() {
+                            @let status = match game.status {
+                                GameStatus::WaitingForPlayers => "Waiting",
+                                GameStatus::InProgress => "In Progress",
+                                GameStatus::Finished => "Finished",
+                            };
+                            tr {
                                 td { (game.game_id) }
                                 td { (game.game_type) }
-                                td { (game.player_count) }                                 
-                                td { (status) } 
-                                td {  
+                                td { (game.player_count) }
+                                td { (status) }
+                                td {
                                     @if game.player_count < 5 {
                                         (can_join)
-                                    }
-                                    else { 
-                                        (cant_join) 
+                                    } @else {
+                                        (cant_join)
                                     }
                                 }
                             }
@@ -200,185 +213,227 @@ async fn list_and_join_games_helper(client: &State<PokerClient>, id: String, sta
                 }
             }
         }
+        Err(_) => html! { p { "Failed to load games." } }
     }
 }
-            
- async fn create_new_game(client: &PokerClient, session: &AuthSession) {
-    println!("\n=== Create New Game ===");
-    println!("1. Five Card Draw (supported)");
-    println!("2. Seven Card Stud (not yet supported)");
-    println!("3. Texas Hold'em (not yet supported)");
-    println!("4. Back to Main Menu");
-    
-    let choice = read_input("Choose game type: ");
-    
-    let game_type = match choice.trim() {
-        "1" => GameType::FiveCardDraw,
-        "2" => {
-            println!("Only Five Card Draw is supported for now.");
-            return;
-        }
-        "3" => {
-            println!("Only Five Card Draw is supported for now.");
-            return;
-        }
-        "4" => {
-            println!("Returning to main menu...");
-            return;
-        }
-        _ => {
-            println!("Invalid choice.");
-            return;
+
+#[get("/register_form")]
+async fn register_form() -> Markup {
+    let content = html! {
+        form hx-post="/register" hx-target="#" hx-swap="innerHTML" {
+            label for="username" { "Username:" }
+            input type="text" name="username" id="username" required {}
+
+            label for="email" { "Email:" }
+            input type="email" name="email" id="email" required {}
+
+            label for="password" { "Password:" }
+            input type="password" name="password" id="password" required {}
+
+            button type="submit" { "Submit" }
         }
     };
-    
-    if let Err(e) = game_settings::create_and_play_game(client, session, game_type).await {
-        println!("Error creating game: {}", e);
-    }
+
+    modal_content("REGISTER", "register-form", content)
 }
 
-#[get("/register_form")] 
-async fn register_form() { 
-    let content = html! { 
+#[get("/login_form")]
+async fn login_form() -> Markup {
+    let content = html! {
         form hx-post="/register" hx-target="#" hx-swap="innerHTML" {
-            label for="username" { "Username:" } 
-            input type="text" name="username" id="username" required; 
+            label for="username" { "Username:" }
+            input type="text" name="username" id="username" required {}
 
-            label for="email" { "Email:" } 
-            input type="email" name="email" id="email" required; 
-            
             label for="password" { "Password:" }
-            input type="password" name="password" id="password" required; 
+            input type="password" name="password" id="password" required {}
 
-            button type="submit" { "Submit" } 
+            button type="submit" { "Submit" }
         }
-    }; 
+    };
 
-    return modal_content("REGISTER", "register-form", content);  
-} 
-
-#[get("/login_form")] 
-async fn login_form() {
-    let content = html! { 
-        form hx-post="/register" hx-target="#" hx-swap="innerHTML" {
-            label for="username" { "Username:" } 
-            input type="text" name="username" id="username" required; 
-
-            label for="password" { "Password:" } 
-            input type="password" name="password" id="password" required; 
-
-            button type="submit" { "Submit" } 
-        }
-    }; 
-
-    return modal_content("LOGIN", "login-form", content); 
+    modal_content("LOGIN", "login-form", content)
 }
 
-#[post("/register", data="<sign_up>")] 
-async fn register(sign_up: Json<SignUpRequest>, state: &State<Arc<SessionCache>>) -> Markup {
-    let result = register_helper(sign_up.email, sign_up.username, sign_up.password).await;
-    let client = PokerClient::localhost(); 
-    let cache = state.lock().unwrap(); 
-    if let result = Ok(auth_session) { 
-        let session = Some(auth_session); 
-        cache.insert(session.user_id, session); 
-        return html! { p { "User successfully logged in" } }; 
+#[post("/register", data = "<sign_up>")]
+async fn register(sign_up: Form<SignUpRequest>, state: &State<Arc<SessionCache>>) -> Markup {
+    match register_helper(&sign_up.email, &sign_up.username, &sign_up.password).await {
+        Ok(auth_session) => {
+            state.insert(auth_session.user_id.clone(), auth_session);
+            html! { p { "User successfully registered" } }
+        }
+        Err(e) => html! { p { "Registration failed: " (e) } },
     }
-    return html! { p { "Login failed" } }; 
-} 
+}
 
-#[post("/login", data="<login>")] 
-async fn login(login: Json<LoginRequest>, 
-    state: &State<Arc<SessionCache>>) {
-    let result = login_helper(login.username, login.password).await; 
-    let cache = state.lock().unwrap(); 
-
-    if let result = Ok(auth_session) { 
-        let session = Some(auth_session); 
-        cache.insert(session.user_id, session); 
+#[post("/login", data = "<login_req>")]
+async fn login(login_req: Form<LoginRequest>, state: &State<Arc<SessionCache>>) -> Markup {
+    match login_helper(&login_req.username, &login_req.password, &login_req.email).await {
+        Ok(auth_session) => {
+            state.insert(auth_session.user_id.clone(), auth_session);
+            html! { p { "User successfully logged in" } }
+        }
+        Err(e) => html! { p { "Login failed: " (e) } },
     }
-} 
-
+}
 
 
 #[get("/")]
-async fn landing() { 
-    layout("", html! { 
+async fn landing() -> Markup {
+    layout("", html! {
         dialog id="register_form" class="rounded p-6 backdrop:bg-black/50" {}
         dialog id="login_form" class="rounded p-6 backdrop:bg-black/50" {}
-        form hx-get="/register_form" hx-target="#register-form" hx-swap="innerHTML" hx-on::after-request="document.getElementById('register-form').showModal()" class="pb-3 text-right" { 
-            input type="hidden" name="id" 
-                value=(id) {}
+        form hx-get="/register_form" hx-target="#register-form" hx-swap="innerHTML" class="pb-3 text-right" {
             button type="submit"
-                class="px-4 py-2 font-bold bg-black text-gray-500 border border-gray-300 rounded hover:bg-gray-600 transition-colors" 
-                { "REGISTER" } 
+                class="px-4 py-2 font-bold bg-black text-gray-500 border border-gray-300 rounded hover:bg-gray-600 transition-colors"
+                { "REGISTER" }
         }
-        form hx-get="/login_form" hx-target="#login-form" hx-swap="innerHTML" hx-on::after-request="document.getElementById('login-form').showModal()" class="pb-3 text-right" { 
-            input type="hidden" name="id" value=(id) {}
-            input type="text" name="username" class="px-4 py-2 text-gray-500 border border-gray-300 rounded" 
-                placeholder="Enter your username..." { }
+        form hx-get="/login_form" hx-target="#login-form" hx-swap="innerHTML" class="pb-3 text-right" {
+            input type="text" name="username" class="px-4 py-2 text-gray-500 border border-gray-300 rounded"
+                placeholder="Enter your username..." {}
             input type="text" name="password" class="px-4 py-2 text-gray-500 border border-gray-300 rounded"
-                placeholder="Enter your password..." { }
-            button type="submit" class="px-4 py-2 font-boldbg-black text-gray-500 border border-gray-300 rounded hover:bg-gray-600 transition-colors" 
+                placeholder="Enter your password..." {}
+            button type="submit" class="px-4 py-2 font-bold bg-black text-gray-500 border border-gray-300 rounded hover:bg-gray-600 transition-colors"
             { "LOGIN" }
         }
-    }) 
+    })
 }
-/*
-        } else {
-            if let Some(ref s) = session {
-                println!("\n=== Welcome, {}! ===", s.username);
-            }
-            
-            println!("\n=== Main Menu ===");
-            println!("1. List & Join Games");
-            println!("2. Create New Game");
-            println!("3. Watch a Game");
-            println!("4. Add Chips");
-            println!("5. Logout");
-            println!("6. Exit");
 
-            let mut choice = String::new();
-            std::io::stdin().read_line(&mut choice).expect("Failed to read line");
 
-            match choice.trim() {
-                "1" => list_and_join_games(&client, session.as_ref().unwrap()).await,
-                "2" => create_new_game(&client, session.as_ref().unwrap()).await,
-                "3" => watch_game(&client, session.as_ref().unwrap()).await,
-                "4" => {
-                    println!("Enter amount of chips to add: ");
-                    let amount_str = read_input("Amount: ");
-                    let amount = match amount_str.trim().parse::<u32>() {
-                        Ok(n) => n,
-                        Err(_) => {
-                            println!("Invalid amount. Enter a number.");
-                            continue;
+#[get("/create_new_game?<id>")]
+async fn create_new_game(id: &str) -> Markup {
+    layout("Create Game", html! {
+        div class="max-w-sm" {
+            h2 class="font-serif text-3xl font-bold mb-8 text-white" { "Create a Room" }
+            div class="bg-zinc-900 border border-zinc-800 rounded-xl p-8" {
+                form action="/start_game" method="post" {
+                    input type="hidden" name="id" value=(id) {}
+                    div class="mb-5" {
+                        label for="game_type" class="block text-xs font-semibold tracking-widest uppercase text-zinc-400 mb-1.5" { "Game Variant" }
+                        select name="game_type" id="game_type"
+                            class="w-full bg-zinc-800 border border-zinc-700 text-white rounded-lg px-3.5 py-2.5 text-sm appearance-none cursor-pointer focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20" {
+                            option value="FiveCardDraw"  { "Five Card Draw" }
+                            option value="SevenCardStud" { "Seven Card Stud" }
+                            option value="TexasHoldEm"   { "Texas Hold'Em" }
                         }
-                    };
-                    match client.add_chips(&session.as_ref().unwrap().user_id, amount).await {
-                        Ok(resp) => {
-                            if resp.success {
-                                println!("{} (chips added: {})", resp.message, resp.chips_added);
-                            } else {
-                                println!("Error: {}", resp.message);
-                            }
-                        }
-                        Err(e) => println!("Error adding chips: {}", e),
                     }
-                    continue;
+                    button type="submit"
+                        class="w-full bg-emerald-400 text-emerald-950 font-bold px-7 py-3 rounded-lg text-base hover:bg-emerald-300 transition-colors cursor-pointer border-0" {
+                        "Create Room"
+                    }
                 }
-                "5" => {
-                    session = None;
-                    authenticated = false;
-                    println!("Logged out successfully.");
-                }
-                "6" => {
-                    println!("Exiting the game. Goodbye!");
-                    break;
-                }
-                _ => println!("Invalid choice, please try again."),
             }
         }
+    })
+}
+
+#[get("/watch_game?<id>")]
+async fn watch_game(id: String, client: &State<PokerClient>) -> Markup {
+    let back = format!("/main_menu?id={}", id);
+    match client.list_games().await {
+        Ok(response) => {
+            let watchable: Vec<_> = response.games.iter()
+                .filter(|g| g.status != GameStatus::Finished).collect();
+            layout("Spectate", html! {
+                h2 class="font-serif text-3xl font-bold mb-8 text-white" { "Spectate a Game" }
+                @if watchable.is_empty() {
+                    div class="bg-amber-900/20 border border-amber-700/40 text-amber-400 rounded-xl p-10 text-center" {
+                        div class="text-4xl mb-3" { "♦" }
+                        div class="font-semibold" { "No active games to watch" }
+                    }
+                } @else {
+                    div class="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden" {
+                        table class="w-full border-collapse text-sm" {
+                            thead {
+                                tr {
+                                    th class="text-left px-4 py-3 text-xs font-bold tracking-widest uppercase text-zinc-600 border-b border-zinc-800" { "Game ID" }
+                                    th class="text-left px-4 py-3 text-xs font-bold tracking-widest uppercase text-zinc-600 border-b border-zinc-800" { "Type" }
+                                    th class="text-left px-4 py-3 text-xs font-bold tracking-widest uppercase text-zinc-600 border-b border-zinc-800" { "Players" }
+                                    th class="text-left px-4 py-3 text-xs font-bold tracking-widest uppercase text-zinc-600 border-b border-zinc-800" { "Status" }
+                                    th class="px-4 py-3 border-b border-zinc-800" { "" }
+                                }
+                            }
+                            tbody {
+                                @for game in watchable.iter() {
+                                    @let (s_txt, s_cls) = match game.status {
+                                        GameStatus::WaitingForPlayers => ("Waiting",     "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-900/30 text-amber-400"),
+                                        GameStatus::InProgress        => ("In Progress", "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-900/30 text-emerald-400"),
+                                        GameStatus::Finished          => ("Finished",    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-zinc-800 text-zinc-500"),
+                                    };
+                                    tr class="hover:bg-zinc-800/50 transition-colors" {
+                                        td class="px-4 py-3 border-b border-zinc-800" {
+                                            span class="font-mono text-xs text-zinc-500" { (game.game_id) }
+                                        }
+                                        td class="px-4 py-3 border-b border-zinc-800 text-white" { (game.game_type) }
+                                        td class="px-4 py-3 border-b border-zinc-800 text-zinc-400" { (game.player_count) "/" (game.max_players) }
+                                        td class="px-4 py-3 border-b border-zinc-800" {
+                                            span class=(s_cls) { (s_txt) }
+                                        }
+                                        td class="px-4 py-3 border-b border-zinc-800" {
+                                            form action="/register_viewer" method="post" {
+                                                input type="hidden" name="id" value=(id) {}
+                                                input type="hidden" name="game_id" value=(game.game_id) {}
+                                                button type="submit"
+                                                    class="inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-900/30 text-blue-400 border border-blue-800/50 hover:bg-blue-900/50 transition-colors cursor-pointer" {
+                                                    "Watch"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        }
+        Err(e) => layout("Spectate", html! {
+            a href=(back) class="inline-flex items-center px-4 py-2 text-sm text-zinc-400 border border-zinc-700 rounded-lg hover:bg-zinc-800 hover:text-white transition-colors mb-4" { "← Lobby" }
+            div class="bg-red-900/20 border border-red-700/40 text-pink-400 rounded-lg p-3 text-sm" { (e) }
+        }),
     }
 }
-*/
+
+#[get("/add_chips?<id>")]
+async fn add_chips(id: &str) -> Markup {
+    layout("Add Chips", html! {
+        div class="max-w-sm" {
+            h2 class="font-serif text-3xl font-bold mb-8 text-white" { "Add Chips" }
+            div class="bg-zinc-900 border border-zinc-800 rounded-xl p-8" {
+                form action="/chips" method="post" {
+                    input type="hidden" name="id" value=(id) {}
+
+                    div class="mb-5" {
+                        label class="block text-xs font-semibold tracking-widest uppercase text-zinc-400 mb-1.5" { "Quick Select" }
+                        div class="flex gap-2" {
+                            button type="button"
+                                class="flex-1 bg-zinc-800 border border-zinc-600 text-white rounded-lg py-2 font-mono text-sm font-bold cursor-pointer hover:border-emerald-400 hover:text-emerald-400 hover:bg-emerald-900/20 transition-all"
+                                onclick="document.getElementById('amount').value='1000'" { "1,000" }
+                            button type="button"
+                                class="flex-1 bg-zinc-800 border border-zinc-600 text-white rounded-lg py-2 font-mono text-sm font-bold cursor-pointer hover:border-emerald-400 hover:text-emerald-400 hover:bg-emerald-900/20 transition-all"
+                                onclick="document.getElementById('amount').value='5000'" { "5,000" }
+                            button type="button"
+                                class="flex-1 bg-zinc-800 border border-zinc-600 text-white rounded-lg py-2 font-mono text-sm font-bold cursor-pointer hover:border-emerald-400 hover:text-emerald-400 hover:bg-emerald-900/20 transition-all"
+                                onclick="document.getElementById('amount').value='10000'" { "10,000" }
+                        }
+                    }
+
+                    div class="mb-5" {
+                        label for="amount" class="block text-xs font-semibold tracking-widest uppercase text-zinc-400 mb-1.5" { "Custom Amount" }
+                        input type="number" name="amount" id="amount" required min="1"
+                            class="w-full bg-zinc-800 border border-zinc-700 text-white rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20 placeholder-zinc-600"
+                            placeholder="Enter amount" {}
+                    }
+
+                    button type="submit"
+                        class="w-full bg-emerald-400 text-emerald-950 font-bold px-7 py-3 rounded-lg text-base hover:bg-emerald-300 transition-colors cursor-pointer border-0 mb-4" {
+                        "Add Chips"
+                    }
+
+                    p class="text-xs text-zinc-600 text-center" {
+                        "Note: You cannot add chips while in an active game."
+                    }
+                }
+            }
+        }
+    })
+}
