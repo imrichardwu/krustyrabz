@@ -18,13 +18,9 @@ jobs:
 
       - name: Cache cargo registry and git dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: backend
 
       - name: Check workspace
-        working-directory: backend
         run: cargo check --workspace
 
       - name: Run tests
-        working-directory: backend
         run: cargo test --workspace
