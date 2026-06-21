@@ -53,7 +53,7 @@ fn rocket() -> _ {
             watch_game,
             add_chips,
         ])
-        .mount("/public", FileServer::from("../public"))
+        .mount("/public", FileServer::from("public"))
         .manage(Arc::new(session_cache))
         .manage(client)
 }
@@ -234,13 +234,13 @@ async fn register_form() -> Markup {
         }
     };
 
-    modal_content("REGISTER", "register-form", content)
+    modal_content("REGISTER", "register_form", content)
 }
 
 #[get("/login_form")]
 async fn login_form() -> Markup {
     let content = html! {
-        form hx-post="/register" hx-target="#" hx-swap="innerHTML" {
+        form hx-post="/login" hx-target="#" hx-swap="innerHTML" {
             label for="username" { "Username:" }
             input type="text" name="username" id="username" required {}
 
@@ -251,7 +251,7 @@ async fn login_form() -> Markup {
         }
     };
 
-    modal_content("LOGIN", "login-form", content)
+    modal_content("LOGIN", "login_form", content)
 }
 
 #[post("/register", data = "<sign_up>")]
@@ -282,7 +282,7 @@ async fn landing() -> Markup {
     layout("", html! {
         dialog id="register_form" class="rounded p-6 backdrop:bg-black/50" {}
         dialog id="login_form" class="rounded p-6 backdrop:bg-black/50" {}
-        form hx-get="/register_form" hx-target="#register-form" hx-swap="innerHTML" class="pb-3 text-right" {
+        form hx-get="/register_form" hx-target="#register_form" hx-swap="innerHTML" class="pb-3 text-right" {
             button type="submit"
                 class="px-4 py-2 font-bold bg-black text-gray-500 border border-gray-300 rounded hover:bg-gray-600 transition-colors"
                 { "REGISTER" }
