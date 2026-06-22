@@ -7,7 +7,9 @@ mod player;
 use crate::api::PokerClient;
 use games::game_settings;
 use authentication::{AuthSession, login_helper, register_helper};
-use rocket::form::Form;
+use rocket::{form::Form, http::Status}; 
+use rocket::http::Header;
+use rocket::response::Response; 
 use poker_core::{GameType, GameStatus};
 use rocket::State;
 use rocket::fs::FileServer;
@@ -65,16 +67,16 @@ fn layout(title: &str, content: Markup) -> Markup {
                 head {
                     meta charset="utf-8" {}
                     title { (title) }
-                    link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" {}
+                    link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital@0;1&display=swap" { }
                     script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module" {}
                     script src="https://cdn.tailwindcss.com" {}
-                    link rel="stylesheet" type="text/css" href="https://unpkg.com/cardsJS/dist/cards.min.css" {}
-                    script src="https://unpkg.com/cardsJS/dist/cards.min.js" type="text/javascript" {}
+                    link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/cardsjs/dist/cards.min.css" {}
+                    script src="https://cdn.jsdelivr.net/npm/cardshs/dist/cards.min.js" type="text/javascript" {}
                 }
                 script src="https://unpkg.com/htmx.org@2.0.0" {}
                 script { (PreEscaped("document.addEventListener('htmx:afterRequest',function(e){var t=e.detail.target;if(t&&t.tagName==='DIALOG')t.showModal();});")) }
                 body class="bg-black text-white" style="font-family: 'Roboto', sans-serif;" {
-                    header { img src="../public/logo.png" {}
+                    header {  {}
                         main style="mt-500 mb-500" { (content) }
                     }
                 }
@@ -220,17 +222,22 @@ async fn list_and_join_games_helper(client: &State<PokerClient>, id: String, sta
 #[get("/register_form")]
 async fn register_form() -> Markup {
     let content = html! {
-        form hx-post="/register" hx-target="#" hx-swap="innerHTML" {
-            label for="username" { "Username:" }
-            input type="text" name="username" id="username" required {}
-
-            label for="email" { "Email:" }
-            input type="email" name="email" id="email" required {}
-
-            label for="password" { "Password:" }
-            input type="password" name="password" id="password" required {}
-
-            button type="submit" { "Submit" }
+        form hx-post="/register"  {
+            div.row {
+                label for="username" { "Username:" }
+                input type="text" name="username" id="username" required {}
+            }
+            div.row { 
+                label for="email" { "Email:" }
+                input type="email" name="email" id="email" required {}
+            }
+            div.row { 
+                label for="password" { "Password:" }
+                input type="password" name="password" id="password" required {}
+            }
+            div.row { 
+                button type="submit" { "Submit" }
+            }
         }
     };
 
@@ -240,9 +247,12 @@ async fn register_form() -> Markup {
 #[get("/login_form")]
 async fn login_form() -> Markup {
     let content = html! {
-        form hx-post="/login" hx-target="#" hx-swap="innerHTML" {
+        form hx-post="/login" {
             label for="username" { "Username:" }
             input type="text" name="username" id="username" required {}
+
+            label for="email" { "Email:" }
+            input type="text" name="email" id="email" required { } 
 
             label for="password" { "Password:" }
             input type="password" name="password" id="password" required {}
@@ -254,25 +264,42 @@ async fn login_form() -> Markup {
     modal_content("LOGIN", "login_form", content)
 }
 
+#[derive(Responder)] 
+struct HxRedirect { 
+    inner: String, 
+    header: Header<'static>, 
+}
+
+impl HxRedirect { 
+    fn to(url: impl Into<String>) -> Self { 
+        HxRedirect { 
+            inner: String::new(), 
+            header: Header::new("HX-Redirect", url.into()), 
+        }
+    }
+}
+
 #[post("/register", data = "<sign_up>")]
-async fn register(sign_up: Form<SignUpRequest>, state: &State<Arc<SessionCache>>) -> Markup {
+async fn register(sign_up: Form<SignUpRequest>, state: &State<Arc<SessionCache>>) -> HxRedirect  {
     match register_helper(&sign_up.email, &sign_up.username, &sign_up.password).await {
         Ok(auth_session) => {
             state.insert(auth_session.user_id.clone(), auth_session);
-            html! { p { "User successfully registered" } }
-        }
-        Err(e) => html! { p { "Registration failed: " (e) } },
+           HxRedirect::to("/main_menu")
+        },
+        Err(_) => { 
+            HxRedirect::to("/")
+        },
     }
 }
 
 #[post("/login", data = "<login_req>")]
-async fn login(login_req: Form<LoginRequest>, state: &State<Arc<SessionCache>>) -> Markup {
+async fn login(login_req: Form<LoginRequest>, state: &State<Arc<SessionCache>>) -> HxRedirect {
     match login_helper(&login_req.username, &login_req.password, &login_req.email).await {
         Ok(auth_session) => {
             state.insert(auth_session.user_id.clone(), auth_session);
-            html! { p { "User successfully logged in" } }
-        }
-        Err(e) => html! { p { "Login failed: " (e) } },
+            HxRedirect::to("/main_menu")
+        },
+        Err(_) => HxRedirect::to("/")
     }
 }
 
@@ -282,19 +309,22 @@ async fn landing() -> Markup {
     layout("", html! {
         dialog id="register_form" class="rounded p-6 backdrop:bg-black/50" {}
         dialog id="login_form" class="rounded p-6 backdrop:bg-black/50" {}
-        form hx-get="/register_form" hx-target="#register_form" hx-swap="innerHTML" class="pb-3 text-right" {
+        div class="h1 text-center" style="font-family: 'Playfair Display', serif; color: #B8860B;" { "PLAY POKER: WIN BIG OR GO BROKE TRYING!" }
+        div class="grid grid-cols-2 gap-0" { 
+            div class="mt-20" { form hx-get="/register_form" hx-target="#register_form" hx-swap="innerHTML" class="pb-3 text-right" {
             button type="submit"
-                class="px-4 py-2 font-bold bg-black text-gray-500 border border-gray-300 rounded hover:bg-gray-600 transition-colors"
-                { "REGISTER" }
+                style="font-family: 'Playfair Display', serif; color: #B8860B; border: 2px solid #B8860B;" class="px-4 py-2 bg-black text-yellow border border-gray-300 rounded hover:bg-gray-600 transition-colors"
+                { 
+                    img src="public/RED_BACK.svg" { "REGISTER" }
+                }
+        } } 
+            div class="text-left justify-self-start mt-20" { form hx-get="/login_form" hx-target="#login_form" hx-swap="innerHTML" class="pb-3 text-right" {
+            button type="submit" style="font-family: 'Playfair Display', serif; color: #B8860B; border: 2px solid #B8860B;" class="px-4 py-2 bg-black text-yellow border border-gray-300 rounded hover:bg-gray-600 transition-colors"
+            {
+                img src="public/BLUE_BACK.svg" { "LOGIN" } }
+        } }
         }
-        form hx-get="/login_form" hx-target="#login-form" hx-swap="innerHTML" class="pb-3 text-right" {
-            input type="text" name="username" class="px-4 py-2 text-gray-500 border border-gray-300 rounded"
-                placeholder="Enter your username..." {}
-            input type="text" name="password" class="px-4 py-2 text-gray-500 border border-gray-300 rounded"
-                placeholder="Enter your password..." {}
-            button type="submit" class="px-4 py-2 font-bold bg-black text-gray-500 border border-gray-300 rounded hover:bg-gray-600 transition-colors"
-            { "LOGIN" }
-        }
+        div class="h1 mt-20 text-center" style="font-family: 'Playfair Display', serif; color: #B8860B;" {"PLEASE PLAY SENSIBLY! 80% of gamblers quit just before they make it big. Never stop gambling! You can do it!" } 
     })
 }
 
