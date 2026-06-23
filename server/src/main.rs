@@ -14,10 +14,28 @@ pub mod player;
 pub mod table;
 
 use house::House;
-use storage::establish_connection; 
-use storage::repository::create_supabase_client; 
+use storage::establish_connection;
+use storage::repository::create_supabase_client;
 use tokio::runtime::Runtime;
+use rocket::fairing::{Fairing, Info, Kind};
+use rocket::http::Header;
+use rocket::{Request, Response};
 
+/// CORS fairing — allows the web client (port 8001) to connect to the server (port 8000).
+/// Required so the browser's EventSource API can subscribe to SSE game updates.
+pub struct CorsFairing;
+
+#[rocket::async_trait]
+impl Fairing for CorsFairing {
+    fn info(&self) -> Info {
+        Info { name: "CORS", kind: Kind::Response }
+    }
+    async fn on_response<'r>(&self, _req: &'r Request<'_>, res: &mut Response<'r>) {
+        res.set_header(Header::new("Access-Control-Allow-Origin", "http://127.0.0.1:8001"));
+        res.set_header(Header::new("Access-Control-Allow-Methods", "GET, POST, OPTIONS"));
+        res.set_header(Header::new("Access-Control-Allow-Headers", "Content-Type"));
+    }
+}
 
 /// Launches the Rocket server with the House state and all routes mounted.
 #[launch]
@@ -38,9 +56,10 @@ fn rocket() -> _ {
         .expect("Failed to create client"); 
 
     rocket::build()
+        .attach(CorsFairing)
         .manage(House::new())
         .manage(db)
-        .manage(client) 
+        .manage(client)
         .mount(
             "/",
             routes![
