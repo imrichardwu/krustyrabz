@@ -14,6 +14,7 @@ use poker_core::hand::Hand;
 use crate::player::Player;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::time::Duration;
 use rocket::{get, post, State};
 use rocket::serde::{json::Json, Deserialize};
 
@@ -48,6 +49,50 @@ impl House {
             live_games: Arc::new(Mutex::new(HashMap::new())),
             hands: Arc::new(Mutex::new(HashMap::new())),
             event_senders: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Start the background timeout checker task.
+    /// This should be called after the Tokio runtime is running (e.g., in a Rocket fairing).
+    pub fn start_timeout_checker(live_games: Arc<Mutex<HashMap<String, Game>>>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(2));
+            loop {
+                interval.tick().await;
+                Self::check_all_timeouts(&live_games).await;
+            }
+        });
+    }
+
+    /// Background task that checks all games for player timeouts.
+    async fn check_all_timeouts(games: &Arc<Mutex<HashMap<String, Game>>>) {
+        let timeout_duration = Duration::from_secs(30); // 30 second timeout
+        let mut timeouts = Vec::new();
+
+        // Collect timeouts (don't hold lock while processing)
+        {
+            let games_lock = games.lock().unwrap();
+            for (game_id, game) in games_lock.iter() {
+                if let Some(timed_out_player) = game.check_timeout(timeout_duration) {
+                    timeouts.push((game_id.clone(), timed_out_player));
+                }
+            }
+        }
+
+        // Process each timeout
+        for (game_id, player_id) in timeouts {
+            let mut games_lock = games.lock().unwrap();
+            if let Some(game) = games_lock.get_mut(&game_id) {
+                match game.timeout_player(player_id) {
+                    Ok(_) => {
+                        println!("⏰ Player {} timed out in game {}", player_id, game_id);
+                        // Game state will be broadcast via SSE on next action
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to timeout player {}: {}", player_id, e);
+                    }
+                }
+            }
         }
     }
 

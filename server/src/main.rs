@@ -53,11 +53,19 @@ fn rocket() -> _ {
     // We need to pass a supabase connection as managed state 
     let client = rt
         .block_on(create_supabase_client())
-        .expect("Failed to create client"); 
+        .expect("Failed to create client");
+
+    let house = House::new();
+    let house_games = house.live_games.clone();
 
     rocket::build()
         .attach(CorsFairing)
-        .manage(House::new())
+        .attach(rocket::fairing::AdHoc::on_liftoff("Timeout Checker", |_| Box::pin(async move {
+            // Start timeout checker after Rocket runtime is ready
+            House::start_timeout_checker(house_games);
+            println!("⏰ Timeout checker started (30s inactivity limit)");
+        })))
+        .manage(house)
         .manage(db)
         .manage(client)
         .mount(

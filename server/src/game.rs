@@ -5,6 +5,7 @@ use crate::table::Table;
 use poker_core::{Card, CardType, DeckTrait, GameStatus, GameType};
 use strum_macros::Display;
 use uuid::Uuid;
+use std::time::{Instant, Duration};
 
 #[derive(Debug, Clone)]
 pub struct SharedGameState {
@@ -15,6 +16,9 @@ pub struct SharedGameState {
     // Core Game
     pub dealer_idx: usize,
     pub action_on: Option<Uuid>,
+
+    // Timeout tracking
+    pub action_started_at: Option<Instant>,
 
     // Shared Betting Data
     pub betting_state: BettingState,
@@ -28,6 +32,7 @@ impl SharedGameState {
             pot: 0,
             dealer_idx: 0,
             action_on: None,
+            action_started_at: None,
             betting_state: BettingState::new(),
         }
     }
@@ -82,11 +87,13 @@ impl SharedGameState {
 
             if include_all_in || player.chips > 0 {
                 self.action_on = Some(player.id);
+                self.action_started_at = Some(Instant::now());
                 return true;
             }
         }
 
         self.action_on = None;
+        self.action_started_at = None;
         return false;
     }
 
@@ -364,6 +371,14 @@ impl Game {
         }
     }
 
+    pub fn get_action_started_at(&self) -> Option<std::time::Instant> {
+        match self {
+            Game::FiveCardDraw(game) => game.core.action_started_at,
+            Game::SevenCardStud(game) => game.core.action_started_at,
+            Game::TexasHoldEm(game) => game.core.action_started_at,
+        }
+    }
+
     /// Dealer index for building game state (e.g. who is dealer for display).
     pub fn get_dealer_index(&self) -> usize {
         match self {
@@ -486,6 +501,49 @@ impl Game {
                 .table
                 .seat_player(player)
                 .map_err(|e| e.to_string()),
+        }
+    }
+
+    /// Check if the current player's turn has timed out (30 seconds).
+    /// Returns Some(player_id) if timeout occurred, None otherwise.
+    pub fn check_timeout(&self, timeout_duration: Duration) -> Option<Uuid> {
+        if let (Some(player_id), Some(started_at)) = (self.get_action_on(), self.get_action_started_at()) {
+            if started_at.elapsed() > timeout_duration {
+                return Some(player_id);
+            }
+        }
+        None
+    }
+
+    /// Auto-fold a player due to timeout.
+    pub fn timeout_player(&mut self, player_id: Uuid) -> Result<(), String> {
+        use poker_core::protocol::GameAction;
+        
+        match self {
+            Game::FiveCardDraw(game) => {
+                // Auto-fold the player
+                match game.betting_round {
+                    BettingRound::PreDraw => game.predraw_betting(player_id, GameAction::Fold),
+                    BettingRound::PostDraw => game.postdraw_betting(player_id, GameAction::Fold),
+                    _ => Err("Not in a betting phase".to_string()),
+                }
+            }
+            Game::SevenCardStud(game) => {
+                // Auto-fold the player
+                if game.betting_round != BettingRound::PreDeal {
+                    game.handle_action(player_id, GameAction::Fold)
+                } else {
+                    Err("Not in a betting phase".to_string())
+                }
+            }
+            Game::TexasHoldEm(game) => {
+                // Auto-fold the player
+                if game.betting_round != BettingRound::PreDeal {
+                    game.handle_action(player_id, GameAction::Fold)
+                } else {
+                    Err("Not in a betting phase".to_string())
+                }
+            }
         }
     }
 
