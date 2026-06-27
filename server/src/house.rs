@@ -189,7 +189,12 @@ impl House {
         if let Some(json) = json {
             let senders = self.event_senders.lock().unwrap();
             if let Some(tx) = senders.get(game_id) {
-                let _ = tx.send(json);
+                match tx.send(json) {
+                    Ok(_) => println!("Broadcast game state for game {}", game_id),
+                    Err(e) => eprintln!("Failed to broadcast: {}", e),
+                }
+            } else {
+                println!("No SSE subscribers for game {}", game_id);
             }
         }
     }
@@ -534,12 +539,19 @@ pub async fn perform_action(
         return Json(GameResponse::error("game_id in URL and body must match".to_string()));
     }
 
+    // Track if showdown occurred and who won
+    let mut showdown_results: Option<Vec<(Uuid, u32)>> = None;
+
     let outcome: Result<GameStateUpdate, String> = {
         let mut games = house.live_games.lock().unwrap();
         let game = match games.get_mut(&game_id) {
             Some(g) => g,
             None => return Json(GameResponse::error("Game not found".to_string())),
         };
+        
+        // Check if this action will trigger a showdown
+        let before_showdown = game.get_last_showdown();
+        
         let result = match game.get_game_type() {
             poker_core::GameType::FiveCardDraw => match &inner.action {
                 GameAction::Fold => handle_fold(game, player_id),
@@ -554,8 +566,44 @@ pub async fn perform_action(
                 game.handle_action(player_id, inner.action.clone())
             }
         };
+        
+        // Check if showdown just happened
+        let after_showdown = game.get_last_showdown();
+        if before_showdown.is_none() && after_showdown.is_some() {
+            // Showdown just occurred! Extract player IDs and amounts
+            if let Some(ref showdown_data) = after_showdown {
+                // Get player IDs from game
+                let mut winners = Vec::new();
+                for (username, amount) in showdown_data {
+                    // Find player ID by username
+                    if let Some(player) = game.get_players().iter().find(|p| &p.username == username) {
+                        winners.push((Uuid::parse_str(&player.player_id).unwrap(), *amount));
+                    }
+                }
+                showdown_results = Some(winners);
+            }
+        }
+        
         result.map(|()| build_game_state_update(game, Some(&inner.player_id)))
     }; // games lock released
+
+    // Update database balances if showdown occurred
+    if let Some(winners) = showdown_results {
+        for (winner_id, winnings) in winners {
+            if let Ok(repo) = Repository::new().await {
+                let winner_id_str = winner_id.to_string();
+                if let Ok(mut account) = repo.get_user_account_by_id(&winner_id_str).await {
+                    account.token_balance += winnings as i32;
+                    if let Err(e) = repo.update_user_account(&account).await {
+                        eprintln!("Failed to update balance for {}: {}", winner_id_str, e);
+                    } else {
+                        println!("Updated balance for {} +${} (new balance: ${})", 
+                                 account.username.unwrap_or_default(), winnings, account.token_balance);
+                    }
+                }
+            }
+        }
+    }
 
     match outcome {
         Ok(state) => {
