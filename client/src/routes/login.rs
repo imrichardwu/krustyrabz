@@ -1,11 +1,9 @@
 use rocket::form::Form;
 use rocket::http::CookieJar;
-use rocket::State;
 use rocket::response::Redirect;
-use std::sync::Arc;
 use maud::{html, Markup};
 
-use crate::{SessionCache, set_session_cookie, layout};
+use crate::{set_session_cookie, layout};
 use crate::authentication::login_helper;
 
 #[derive(rocket::form::FromForm)]
@@ -16,13 +14,13 @@ pub struct LoginRequest {
 
 #[get("/login_page")]
 pub async fn login_page() -> Markup {
-    layout("Sign In — Poker", html! {
+    layout("Sign In - Poker", html! {
         div class="min-h-screen flex items-center justify-center px-4" style="background:#0f1117;" {
             div class="w-full max-w-md" {
                 // Header
                 div class="text-center mb-8" {
-                    div class="inline-block mb-4 text-5xl" style="color:#42b883;" { "♠" }
-                    h1 class="text-3xl font-bold mb-2" style="font-family:'Playfair Display',serif; color:white;" {
+                    div class="inline-block mb-4 text-5xl" style="color:#42b883;" { "P" }
+                    h1 class="text-3xl font-bold mb-2" style="color:white;" {
                         "Welcome Back"
                     }
                     p class="text-sm" style="color:#7a8fa6;" { "Sign in to continue playing" }
@@ -45,7 +43,7 @@ pub async fn login_page() -> Markup {
                             input type="password" name="password" id="login-password" required
                                 class="w-full rounded-lg px-3.5 py-2.5 text-sm focus:outline-none"
                                 style="background:#0f1117; border:1px solid #2d3a4a; color:white;"
-                                placeholder="••••••••" {}
+                                placeholder="password" {}
                         }
                         button type="submit"
                             class="w-full font-bold py-3 rounded-lg transition-colors mt-2"
@@ -74,12 +72,11 @@ pub async fn login_page() -> Markup {
 #[post("/login", data = "<login_req>")]
 pub async fn login(
     login_req: Form<LoginRequest>,
-    state: &State<Arc<SessionCache>>,
     cookies: &CookieJar<'_>,
 ) -> Redirect {
     match login_helper("", &login_req.password, &login_req.email).await {
         Ok(auth_session) => {
-            set_session_cookie(cookies, state, auth_session);
+            set_session_cookie(cookies, auth_session);
             Redirect::to("/main_menu")
         }
         Err(_) => Redirect::to("/login_page"),

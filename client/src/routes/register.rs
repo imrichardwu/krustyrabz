@@ -1,11 +1,9 @@
 use rocket::form::Form;
 use rocket::http::CookieJar;
-use rocket::State;
 use rocket::response::Redirect;
-use std::sync::Arc;
 use maud::{html, Markup};
 
-use crate::{SessionCache, set_session_cookie, layout};
+use crate::{set_session_cookie, layout};
 use crate::authentication::register_helper;
 
 #[derive(rocket::form::FromForm)]
@@ -17,13 +15,13 @@ pub struct SignUpRequest {
 
 #[get("/register_page")]
 pub async fn register_page() -> Markup {
-    layout("Register — Poker", html! {
+    layout("Register - Poker", html! {
         div class="min-h-screen flex items-center justify-center px-4" style="background:#0f1117;" {
             div class="w-full max-w-md" {
                 // Header
                 div class="text-center mb-8" {
-                    div class="inline-block mb-4 text-5xl" style="color:#42b883;" { "♠" }
-                    h1 class="text-3xl font-bold mb-2" style="font-family:'Playfair Display',serif; color:white;" {
+                    div class="inline-block mb-4 text-5xl" style="color:#42b883;" { "P" }
+                    h1 class="text-3xl font-bold mb-2" style="color:white;" {
                         "Join The Table"
                     }
                     p class="text-sm" style="color:#7a8fa6;" { "Create your account to start playing" }
@@ -54,7 +52,7 @@ pub async fn register_page() -> Markup {
                             input type="password" name="password" id="reg-password" required minlength="6"
                                 class="w-full rounded-lg px-3.5 py-2.5 text-sm focus:outline-none"
                                 style="background:#0f1117; border:1px solid #2d3a4a; color:white;"
-                                placeholder="••••••••" {}
+                                placeholder="password" {}
                             p class="text-xs mt-1" style="color:#4a5568;" { "Minimum 6 characters" }
                         }
                         button type="submit"
@@ -84,12 +82,11 @@ pub async fn register_page() -> Markup {
 #[post("/register", data = "<sign_up>")]
 pub async fn register(
     sign_up: Form<SignUpRequest>,
-    state: &State<Arc<SessionCache>>,
     cookies: &CookieJar<'_>,
 ) -> Redirect {
     match register_helper(&sign_up.email, &sign_up.username, &sign_up.password).await {
         Ok(auth_session) => {
-            set_session_cookie(cookies, state, auth_session);
+            set_session_cookie(cookies, auth_session);
             Redirect::to("/main_menu")
         }
         Err(_) => Redirect::to("/register_page"),

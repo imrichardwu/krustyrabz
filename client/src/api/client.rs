@@ -4,14 +4,11 @@
 
 use poker_core::{
     ActionRequest, AddChipsRequest, AddChipsResponse, CreateGameRequest, GameAction, GameListResponse,
-    GameResponse, GameStateUpdate, GameType, HouseRules, JoinGameRequest, PlayerStats, ServerResponse,
+    GameResponse, GameStateUpdate, GameType, HouseRules, JoinGameRequest, ServerResponse,
     ViewerRequest,
 };
 use reqwest::Client;
-// FOR PHASE 2 - use reqwest_eventsource::{Event, EventSource}; 
-// We should use server-sent events in Phase 2, with each client maintaining 
-// a long-lived connection to an event-stream of GameStateUpdates, and only hitting HTTP endpoints 
-// to perform specific actions (when allowed by the server). 
+
 
 
 /// HTTP client for communicating with the Poker server.
@@ -99,7 +96,6 @@ impl PokerClient {
     }
 
     // Leave a game.
-    #[allow(dead_code)]
     pub async fn leave_game(&self, player_id: &str, game_id: &str) -> Result<ServerResponse, ApiError> {
         let response = self            .client
             .post(format!("{}/games/{}/leave", self.base_url, game_id))
@@ -212,19 +208,6 @@ impl PokerClient {
     // Player
     // =========================================================================
 
-    /// Get player statistics.
-    #[allow(dead_code)]
-    pub async fn get_stats(&self, player_id: &str) -> Result<PlayerStats, ApiError> {
-        let response = self
-            .client
-            .get(format!("{}/players/{}/stats", self.base_url, player_id))
-            .send()
-            .await?
-            .json()
-            .await?;
-        Ok(response)
-    }
-
     /// Add chips to a player's account 
     pub async fn add_chips(&self, player_id: &str, num: u32) -> Result<AddChipsResponse, ApiError> { 
         let request = AddChipsRequest { 
@@ -279,30 +262,6 @@ impl PokerClient {
             .await?;
         Ok(response)
     }
-
-    /// Health check / ping the server.
-    #[allow(dead_code)]
-    pub async fn ping(&self) -> Result<ServerResponse, ApiError> {
-        let response = self
-            .client
-            .get(format!("{}/", self.base_url))
-            .send()
-            .await?
-            .json()
-            .await?;
-        Ok(response)
-    }
-
-    // =========================================================================
-    // Eventstream -- for phase 2  
-    // =========================================================================
-
-    // /// Viewers and players maintain a long-lived connection to this eventstream,
-    // /// receiving an infinite series of live game state updates. They hit the 
-    // /// HTTP endpoints defined in the methods above to perform specific actions.
-    // pub async fn connect_to_game(&self, game_id: &str) -> Result<ServerResponse, ApiError> { 
-    //    let mut es = EventSource::get(format!("{}/game/{}", self.base_url, game_id); 
-    //}
 
 }
 

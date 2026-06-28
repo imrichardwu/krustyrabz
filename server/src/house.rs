@@ -577,7 +577,7 @@ pub async fn perform_action(
                 for (username, amount) in showdown_data {
                     // Find player ID by username
                     if let Some(player) = game.get_players().iter().find(|p| &p.username == username) {
-                        winners.push((Uuid::parse_str(&player.player_id).unwrap(), *amount));
+                        winners.push((player.id, *amount));
                     }
                 }
                 showdown_results = Some(winners);
@@ -590,17 +590,18 @@ pub async fn perform_action(
     // Update database balances if showdown occurred
     if let Some(winners) = showdown_results {
         for (winner_id, winnings) in winners {
-            if let Ok(repo) = Repository::new().await {
-                let winner_id_str = winner_id.to_string();
-                if let Ok(mut account) = repo.get_user_account_by_id(&winner_id_str).await {
-                    account.token_balance += winnings as i32;
-                    if let Err(e) = repo.update_user_account(&account).await {
-                        eprintln!("Failed to update balance for {}: {}", winner_id_str, e);
-                    } else {
-                        println!("Updated balance for {} +${} (new balance: ${})", 
-                                 account.username.unwrap_or_default(), winnings, account.token_balance);
-                    }
+            let repo = match Repository::new().await {
+                Ok(repo) => repo,
+                Err(e) => {
+                    eprintln!("Failed to create repository for winner {}: {}", winner_id, e);
+                    continue;
                 }
+            };
+
+            if let Err(e) = repo.update_user_token_balance(winner_id, winnings as f64).await {
+                eprintln!("Failed to update balance for {}: {}", winner_id, e);
+            } else {
+                println!("Updated balance for {} +${}", winner_id, winnings);
             }
         }
     }
