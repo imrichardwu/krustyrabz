@@ -1,6 +1,6 @@
 # KrustyRabz Poker
 
-A multiplayer poker platform with a Rust server, CLI client, and shared core library.
+A multiplayer poker platform with a Rust game server, Rocket web client, and shared core library.
 
 ---
 
@@ -12,13 +12,13 @@ The project is a **Cargo workspace** with four crates that separate concerns and
 poker-project-krustyrabz/
 ├── core/      # Shared domain types, protocol, and hand evaluation
 ├── server/    # Game host (Rocket HTTP + WebSocket)
-├── client/    # CLI client (reqwest + auth)
+├── client/    # Web client (Rocket + Maud + HTMX + reqwest)
 └── storage/   # Persistence (SeaORM, Supabase/PostgreSQL)
 ```
 
 - **core** — Single source of truth for cards, hands, protocol messages, and game types. No I/O; used by both server and client.
 - **server** — Runs games, holds state (House), and exposes HTTP and WebSocket endpoints. Depends on `core` and optionally `storage`.
-- **client** — Terminal UI: auth (register/login), list/create/join games, play, and watch. Depends on `core`; talks to server over HTTP.
+- **client** — Web UI service with auth/session, lobby, create/join/watch/leave flows, and in-game actions. Depends on `core`; talks to server over HTTP.
 - **storage** — Database connection and migrations (e.g. user accounts). Used by server/auth flows.
 
 ---
@@ -42,26 +42,25 @@ Protocol lives in core so the server implements and the client consumes the same
 
 ## Server
 
-- **Stack:** Rocket (HTTP), optional WebSockets (`rocket_ws`), internal game state.
-- **Entry:** `main.rs` builds Rocket, mounts routes, and manages a `House` state.
-- **House:** Holds active games (e.g. pending, 2–5 player buckets). Creates games by variant (Five Card Draw, Seven Card Stud, Texas Hold'em), matches join/create/action/viewer requests to the right game.
-- **Game variants:** `game.rs` defines an enum (`Game::FiveCardDraw`, `SevenCardStud`, `TexasHoldEm`) and per-variant logic: deck, table, pot, betting rounds, deal, and actions.
-- **Routes:** Typically list games, create game, join game, get game state, perform action, get stats, register viewer, get house rules — all using types from `poker_core::protocol`.
-- **Storage:** Can use the `storage` crate for user/account persistence (e.g. Supabase/PostgreSQL via SeaORM).
+- **Stack:** Rocket HTTP API + Server-Sent Events push updates, in-memory game state, storage-backed account/stat updates.
+- **Entry:** `server/src/main.rs` builds Rocket, enables CORS for the web client (port 8001), initializes DB/Supabase clients, and starts a timeout checker.
+- **House:** `server/src/house.rs` manages live games, event channels, and player timeout handling.
+- **Game variants:** `server/src/game.rs` supports `FiveCardDraw`, `SevenCardStud`, and `TexasHoldEm`.
+- **Routes:** Includes game lifecycle and account endpoints: list/create/join/leave, start hand, game state fetch, perform action, add chips, get stats, register viewer, house rules, and Server-Sent Events game events.
+- **Storage integration:** On showdown, winner balances are persisted via the `storage` repository.
 
 ---
 
 ## Client
 
-- **Stack:** `reqwest` (async HTTP), terminal I/O.
-- **Entry:** `main.rs` — banner, auth loop (register/login/exit), then main menu: list & join games, create game, watch game, logout, exit.
-- **API:** `api/client.rs` — `PokerClient` with methods that map to server routes (e.g. `list_games`, `create_game`, `join_game`, `perform_action`). Uses protocol types from `poker_core`.
-- **Auth:** `authentication/` — register, login, session (e.g. Supabase Auth); session used for authenticated requests.
-- **Games:** `games/game_settings` — create or join a game then run the play loop (prompts, send actions, show state).
-- **Viewer:** `viewer/` — watch a game (e.g. by game id) without playing.
-- **Player:** `player/` — local models for account and statistics (optional; server may be source of truth).
+- **Stack:** Rocket + Maud + HTMX for server-rendered pages, with `reqwest` for API calls to the game server.
+- **Entry:** `client/src/main.rs` launches a web app (default port 8001), mounts page/action routes, and serves static assets from `client/public`.
+- **API layer:** `client/src/api/client.rs` contains `PokerClient`, mapping UI actions to server endpoints (`list_games`, `create_game`, `join_game`, `start_hand`, `perform_action`, `add_chips`, `register_viewer`, etc.).
+- **Auth/session:** `client/src/authentication` and cookie helpers in `main.rs` handle login/register and signed session cookies.
+- **Routes:** `client/src/routes` includes `login`, `register`, `create_game`, `join_game`, `game`, `watch_game`, `chips`, and `leave_game`.
+- **Create flow updates:** Create table now supports selecting game variant (Five Card Draw / Seven Card Stud / Texas Hold'em) and redirects directly into `/play_game` on success.
 
-Design choice: client is a thin CLI that delegates rules and state to the server and uses `poker_core` only for types and protocol.
+Design choice: client is a web frontend gateway that delegates poker rules/state to the server and relies on `poker_core` for shared protocol types.
 
 ---
 
@@ -86,10 +85,12 @@ External crates (across workspace):
 
 - **arrayvec** — Fixed-capacity vectors in core.
 - **async-trait** — Async traits in storage.
+- **dashmap** — Concurrent map utility used by the client crate.
 - **dotenv** — Load environment variables for DB/auth config.
 - **futures-util** — Async utilities for WebSocket handling.
+- **maud** — HTML template engine for the Rocket web client.
 - **rand** — Randomness for decks/shuffling.
-- **reqwest** — HTTP client in CLI.
+- **reqwest** — HTTP client used by the web client API wrapper.
 - **rocket** — HTTP server framework.
 - **rocket_ws** — WebSocket support for Rocket.
 - **sea-orm** — ORM for storage.
@@ -107,16 +108,17 @@ External crates (across workspace):
 
 ## Data Flow (High Level)
 
-1. **Client** sends HTTP requests (create game, join game, action) with bodies that match `poker_core::protocol` request types.
-2. **Server** parses them, updates `House` and the right `Game` variant, and returns responses using protocol response types (`GameResponse`, `GameStateUpdate`, etc.).
-3. **core** is not involved at runtime in I/O; it only defines the types and hand-evaluation logic so server and client stay in sync.
+1. **Browser** loads the Rocket client app on port 8001.
+2. **Client service** sends HTTP requests (create/join/start/action/watch/chips) using `PokerClient`, with payloads from `poker_core::protocol`.
+3. **Server** updates `House` + selected `Game` variant, returns protocol responses, and pushes updates over Server-Sent Events where applicable.
+4. **core** provides shared types/hand logic so client and server remain in sync.
 
 ---
 
 ## Running
 
 - **Server:** From repo root, `cargo run -p server` (ensure port 8000 or configured host is free).
-- **Client:** `cargo run -p client` (defaults to `http://127.0.0.1:8000`).
+- **Client:** `cargo run -p client` (web client serves on `http://127.0.0.1:8001` by default).
 - **Tests:** `cargo test -p poker_core` for core unit tests (cards, hands, protocol).
 
 Requires a Rust toolchain and, for storage, a `.env` with `DATABASE_URL` (and any auth keys if using Supabase).
