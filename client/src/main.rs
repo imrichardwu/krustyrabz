@@ -139,6 +139,7 @@ fn layout(title: &str, content: Markup) -> Markup {
                 meta charset="utf-8" {}
                 meta name="viewport" content="width=device-width, initial-scale=1" {}
                 title { (title) }
+                link rel="icon" type="image/png" href="/public/logo.svg" {}
                 script src="https://cdn.tailwindcss.com" {}
                 script src="https://unpkg.com/htmx.org@2.0.0" {}
                 script {(PreEscaped(r#"
@@ -480,22 +481,34 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
                 div class="flex flex-col items-center gap-4" {
                     @if hand_started {
                         span class="text-xs uppercase tracking-widest" style="color:#4a5568;" { "Your Hand" }
-                        div class="flex gap-2" {
-                            @if is_drawing && my_turn {
-                                @for (i, card) in state.your_hand.iter().enumerate() {
-                                    label class="cursor-pointer group" {
-                                        input type="checkbox" name="discard"
-                                            id=(format!("discard-{}", i))
-                                            value=(i)
-                                            class="hidden peer" {}
-                                        div class="peer-checked:opacity-40 peer-checked:ring-2 peer-checked:ring-red-500 peer-checked:rounded-lg transition-all" {
-                                            (render_card(card))
+                        @if is_drawing && my_turn {
+                            form hx-post="/game/draw" hx-target="#game-state" hx-swap="outerHTML" class="flex flex-col items-center gap-3" {
+                                input type="hidden" name="game_id" value=(game_id) {}
+                                div class="flex gap-2" {
+                                    @for (i, card) in state.your_hand.iter().enumerate() {
+                                        label class="cursor-pointer group" {
+                                            input type="checkbox" name="discard_indices"
+                                                id=(format!("discard-{}", i))
+                                                value=(i)
+                                                class="hidden peer" {}
+                                            div class="peer-checked:opacity-40 peer-checked:ring-2 peer-checked:ring-red-500 peer-checked:rounded-lg transition-all" {
+                                                (render_card(card))
+                                            }
+                                            span class="block text-center text-xs mt-1 peer-checked:font-semibold"
+                                                style="color:#4a5568;" { "discard" }
                                         }
-                                        span class="block text-center text-xs mt-1 peer-checked:font-semibold" 
-                                            style="color:#4a5568;" { "discard" }
                                     }
                                 }
-                            } @else {
+                                button type="submit"
+                                    class="px-6 py-2.5 rounded-lg font-bold text-sm transition-colors"
+                                    style="background:rgba(139,92,246,0.2); color:#a78bfa; border:1px solid rgba(139,92,246,0.4);"
+                                    onmouseover="this.style.background='rgba(139,92,246,0.4)'"
+                                    onmouseout="this.style.background='rgba(139,92,246,0.2)'" {
+                                    "Draw Selected Cards"
+                                }
+                            }
+                        } @else {
+                            div class="flex gap-2" {
                                 @for card in &state.your_hand {
                                     (render_card(card))
                                 }
@@ -557,8 +570,8 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
                             // Bet with amount (only when no one has bet yet)
                             form hx-post="/game/bet" hx-target="#game-state" hx-swap="outerHTML" class="flex gap-2 items-center" {
                                 input type="hidden" name="game_id" value=(game_id) {}
-                                input type="number" name="amount" min="1" placeholder="Amount"
-                                    class="w-24 rounded-lg px-3 py-2.5 text-sm"
+                                input type="number" name="amount" min="10" required placeholder="Min: $10"
+                                    class="w-28 rounded-lg px-3 py-2.5 text-sm"
                                     style="background:#0f1117; border:1px solid #2d3a4a; color:white;" {}
                                 button type="submit" 
                                     class="px-5 py-2.5 rounded-lg font-bold text-sm transition-colors"
@@ -584,8 +597,11 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
                             // Raise with amount (only when there's a bet to raise)
                             form hx-post="/game/raise" hx-target="#game-state" hx-swap="outerHTML" class="flex gap-2 items-center" {
                                 input type="hidden" name="game_id" value=(game_id) {}
-                                input type="number" name="amount" min="1" placeholder="Amount"
-                                    class="w-24 rounded-lg px-3 py-2.5 text-sm"
+                                input type="number" name="amount"
+                                    min=(state.current_bet + 10)
+                                    required
+                                    placeholder=(format!("Raise to: ${}", state.current_bet + 10))
+                                    class="w-32 rounded-lg px-3 py-2.5 text-sm"
                                     style="background:#0f1117; border:1px solid #2d3a4a; color:white;" {}
                                 button type="submit" 
                                     class="px-5 py-2.5 rounded-lg font-bold text-sm transition-colors"
@@ -598,39 +614,14 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
                         }
                     }
 
-                    // Draw action (Five Card Draw drawing phase)
-                    @if my_turn && is_drawing {
-                        form id="draw-form" hx-post="/game/draw" hx-target="#game-state" hx-swap="outerHTML" {
-                            input type="hidden" name="game_id" value=(game_id) {}
-                            div id="discard-inputs" {}
-                            button type="submit"
-                                class="px-6 py-3 rounded-lg font-bold text-sm transition-colors"
-                                style="background:rgba(139,92,246,0.2); color:#a78bfa; border:1px solid rgba(139,92,246,0.4);"
-                                onmouseover="this.style.background='rgba(139,92,246,0.4)'"
-                                onmouseout="this.style.background='rgba(139,92,246,0.2)'" {
-                                "Draw Selected Cards"
-                            }
-                        }
-                        // JS copies checked discard checkboxes into the draw form on submit
-                        script { (PreEscaped(r#"
-document.getElementById('draw-form').addEventListener('htmx:configRequest', function(e) {
-    var inputs = document.getElementById('discard-inputs');
-    inputs.innerHTML = '';
-    document.querySelectorAll('input[name="discard"]:checked').forEach(function(cb) {
-        var h = document.createElement('input');
-        h.type = 'hidden';
-        h.name = 'discard_indices';
-        h.value = cb.value;
-        inputs.appendChild(h);
-    });
-});
-"#)) }
-                    }
-
                     // Waiting message when it's not my turn
-                    @if !my_turn && hand_started && !is_drawing {
+                    @if !my_turn && hand_started {
                         @if let Some(ref acting_username) = state.action_on {
-                            span class="text-sm italic" style="color:#4a5568;" { "Waiting for " (acting_username) "..." }
+                            @if is_drawing {
+                                span class="text-sm italic" style="color:#4a5568;" { "Waiting for " (acting_username) " to draw..." }
+                            } @else {
+                                span class="text-sm italic" style="color:#4a5568;" { "Waiting for " (acting_username) "..." }
+                            }
                         }
                     }
 
