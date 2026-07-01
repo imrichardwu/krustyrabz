@@ -693,36 +693,50 @@ async fn play_game(
     let gid = game_id.to_string();
     let fragment = render_game_fragment(game_id, &session_owned, &game_state);
 
-    // SSE script: connect to server SSE, trigger HTMX fragment re-fetch on each event
+    // SSE script: connect to server SSE, trigger HTMX fragment re-fetch on each event.
     let sse_script = format!(r#"
 (function() {{
     var gameId = {gid:?};
     var sseUrl = 'http://127.0.0.1:8000/games/' + gameId + '/events';
-    console.log('Connecting to SSE:', sseUrl);
-    
-    var es = new EventSource(sseUrl);
-    
-    es.onopen = function() {{
-        console.log('SSE connection established');
-    }};
-    
-    es.onmessage = function(event) {{
-        console.log('SSE event received:', event.data);
+    var debounceTimer = null;
+
+    function isUserTyping() {{
+        var el = document.activeElement;
+        return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
+    }}
+
+    function refreshGameState() {{
+        if (isUserTyping()) return;
+        var target = document.getElementById('game-state');
+        if (!target) return;
         htmx.ajax('GET', '/play_game_fragment?game_id=' + gameId, {{
-            target: '#game-state',
+            target: target,
             swap: 'outerHTML'
         }});
+    }}
+
+    function scheduleRefresh() {{
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(refreshGameState, 150);
+    }}
+
+    var es = new EventSource(sseUrl);
+
+    es.onopen = function() {{
+        console.log('SSE connected – refreshing state');
+        scheduleRefresh();
     }};
-    
+
+    es.onmessage = function(event) {{
+        console.log('SSE event:', event.data);
+        scheduleRefresh();
+    }};
+
     es.onerror = function(err) {{
         console.error('SSE error:', err);
-        console.warn('SSE disconnected, will retry automatically');
     }};
-    
-    window.addEventListener('beforeunload', function() {{ 
-        console.log('Closing SSE connection');
-        es.close(); 
-    }});
+
+    window.addEventListener('beforeunload', function() {{ es.close(); }});
 }})();
 "#, gid = gid);
 
