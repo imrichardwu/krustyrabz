@@ -5,7 +5,7 @@
 use poker_core::{
     ActionRequest, AddChipsRequest, AddChipsResponse, CreateGameRequest, GameAction, GameListResponse,
     GameResponse, GameStateUpdate, GameType, HouseRules, JoinGameRequest, ServerResponse,
-    ViewerRequest,
+    SitOutRequest, ViewerRequest, WithdrawChipsRequest, WithdrawChipsResponse,
 };
 use reqwest::Client;
 
@@ -208,7 +208,24 @@ impl PokerClient {
     // Player
     // =========================================================================
 
-    /// Add chips to a player's account 
+    /// Withdraw chips from a player's account.
+    pub async fn withdraw_chips(&self, player_id: &str, num: u32) -> Result<WithdrawChipsResponse, ApiError> {
+        let request = WithdrawChipsRequest {
+            player_id: player_id.to_string(),
+            num_chips: num,
+        };
+        let response = self
+            .client
+            .post(format!("{}/players/{}/withdrawchips", self.base_url, player_id))
+            .json(&request)
+            .send()
+            .await?
+            .json()
+            .await?;
+        Ok(response)
+    }
+
+    /// Add chips to a player's account
     pub async fn add_chips(&self, player_id: &str, num: u32) -> Result<AddChipsResponse, ApiError> { 
         let request = AddChipsRequest { 
             player_id: player_id.to_string(), 
@@ -228,6 +245,20 @@ impl PokerClient {
     // =========================================================================
     // Viewer
     // =========================================================================
+
+    /// Sit out the next hand (Seven Card Stud only — opt out of ante).
+    pub async fn sit_out_hand(&self, player_id: &str, game_id: &str) -> Result<ServerResponse, ApiError> {
+        let request = SitOutRequest { player_id: player_id.to_string() };
+        let response = self
+            .client
+            .post(format!("{}/games/{}/sitout", self.base_url, game_id))
+            .json(&request)
+            .send()
+            .await?
+            .json()
+            .await?;
+        Ok(response)
+    }
 
     /// Register as a viewer for a game.
     pub async fn register_viewer(&self, viewer_id: &str, game_id: &str) -> Result<ServerResponse, ApiError> {

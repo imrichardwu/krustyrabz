@@ -13,7 +13,7 @@ pub async fn create_new_game(
     cookies: &CookieJar<'_>,
 ) -> Result<Markup, Redirect> {
     let _session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
-    Ok(html! {
+    let fragment = html! {
         div class="w-full max-w-md" {
             h2 class="text-2xl font-bold mb-6" style="color:#42b883;" { "Create a Table" }
             form hx-post="/start_game" hx-target="body" hx-swap="none" class="flex flex-col gap-5" {
@@ -36,7 +36,8 @@ pub async fn create_new_game(
                 }
             }
         }
-    })
+    };
+    Ok(fragment)
 }
 
 #[derive(rocket::form::FromForm)]

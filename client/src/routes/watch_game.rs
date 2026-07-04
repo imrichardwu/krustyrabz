@@ -17,12 +17,12 @@ pub async fn watch_game(
     let user_id = session.user_id.clone();
     drop(session);
 
-    match client.list_games().await {
+    let fragment = match client.list_games().await {
         Ok(response) => {
             let watchable: Vec<_> = response.games.iter()
                 .filter(|g| g.status != GameStatus::Finished)
                 .collect();
-            Ok(html! {
+            html! {
                 div class="w-full max-w-3xl" {
                     h2 class="text-2xl font-bold mb-6" style="color:#42b883;" { "Spectate a Table" }
                     @if watchable.is_empty() {
@@ -87,14 +87,15 @@ pub async fn watch_game(
                         }
                     }
                 }
-            })
+            }
         }
-        Err(_) => Ok(html! {
+        Err(_) => html! {
             div class="rounded-xl p-6" style="background:#1a2332; border:1px solid #2d3a4a;" {
                 p style="color:#f87171;" { "Failed to load games." }
             }
-        }),
-    }
+        },
+    };
+    Ok(fragment)
 }
 
 #[derive(rocket::form::FromForm)]
@@ -116,7 +117,7 @@ pub async fn register_viewer(
     let game_id = req.game_id.clone();
 
     match client.register_viewer(&req.viewer_id, &game_id).await {
-        Ok(_) => HxRedirect::to(format!("/play_game?game_id={}", game_id)),
+        Ok(_) => HxRedirect::to(format!("/spectate?game_id={}", game_id)),
         Err(_) => HxRedirect::to("/main_menu"),
     }
 }

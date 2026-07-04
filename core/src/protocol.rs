@@ -47,12 +47,25 @@ pub struct StatsRequest {
     pub player_id: String,
 }
 
-/// Request to add chips to a player's account. 
-#[derive(Debug, Clone, Serialize, Deserialize)] 
-pub struct AddChipsRequest{ 
-    pub player_id: String, 
+/// Request to add chips to a player's account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddChipsRequest{
+    pub player_id: String,
     pub num_chips: u32,
     pub credit_limit: u32,
+}
+
+/// Request to withdraw chips from a player's account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WithdrawChipsRequest {
+    pub player_id: String,
+    pub num_chips: u32,
+}
+
+/// Request to sit out / opt out of the next hand's ante.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SitOutRequest {
+    pub player_id: String,
 }
 
 // ============================================================================
@@ -82,14 +95,46 @@ impl ServerResponse {
     }
 }
 
-/// Response when adding chips. 
-#[derive(Debug, Clone, Serialize, Deserialize)] 
-pub struct AddChipsResponse { 
-    pub success: bool, 
-    pub message: String, 
-    pub player_id: Uuid, 
+/// Response when adding chips.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddChipsResponse {
+    pub success: bool,
+    pub message: String,
+    pub player_id: Uuid,
     pub credit_limit: u32,
     pub chips_added: u32,
+}
+
+/// Response when withdrawing chips.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WithdrawChipsResponse {
+    pub success: bool,
+    pub message: String,
+    pub player_id: Uuid,
+    pub chips_withdrawn: u32,
+    pub new_balance: u32,
+}
+
+impl WithdrawChipsResponse {
+    pub fn success(message: impl Into<String>, player_id: Uuid, chips_withdrawn: u32, new_balance: u32) -> Self {
+        Self {
+            success: true,
+            message: message.into(),
+            player_id,
+            chips_withdrawn,
+            new_balance,
+        }
+    }
+
+    pub fn error(message: impl Into<String>, player_id: Uuid) -> Self {
+        Self {
+            success: false,
+            message: message.into(),
+            player_id,
+            chips_withdrawn: 0,
+            new_balance: 0,
+        }
+    }
 }
 
 impl AddChipsResponse { 

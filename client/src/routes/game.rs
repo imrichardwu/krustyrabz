@@ -196,6 +196,29 @@ pub async fn draw(
     Ok(render_game_fragment(game_id, &session_owned, &new_state))
 }
 
+#[post("/game/sit_out", data = "<req>")]
+pub async fn sit_out(
+    req: Form<GameIdForm>,
+    cookies: &CookieJar<'_>,
+    client: &State<PokerClient>,
+) -> Result<Markup, Redirect> {
+    let session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
+    let session_owned = session.clone();
+    drop(session);
+
+    let game_id = &req.game_id;
+    let user_id = &session_owned.user_id;
+
+    // Best-effort sit-out; re-fetch state regardless
+    let _ = client.sit_out_hand(user_id, game_id).await;
+    let new_state = match client.get_game(game_id, user_id).await {
+        Ok(s) => s,
+        Err(_) => return Err(Redirect::to("/main_menu")),
+    };
+
+    Ok(render_game_fragment(game_id, &session_owned, &new_state))
+}
+
 pub fn routes() -> Vec<rocket::Route> {
-    rocket::routes![start_hand, fold, check, call, bet, raise, draw]
+    rocket::routes![start_hand, fold, check, call, bet, raise, draw, sit_out]
 }

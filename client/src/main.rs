@@ -8,7 +8,7 @@ use rocket::http::{Cookie, CookieJar, Header, SameSite};
 use rocket::response::{Redirect, Responder};
 use rocket::State;
 use rocket::fs::FileServer;
-use poker_core::{BettingRound, PlayerInfo};
+use poker_core::{BettingRound, GameType, PlayerInfo};
 use poker_core::GameStateUpdate;
 use maud::{html, Markup, DOCTYPE, PreEscaped};
 
@@ -53,6 +53,8 @@ fn rocket() -> _ {
             logout,
             play_game,
             play_game_fragment,
+            spectate,
+            spectate_fragment,
         ])
         .mount("/", routes::login::routes())
         .mount("/", routes::register::routes())
@@ -220,59 +222,48 @@ async fn logout(
 // ============================================================================
 
 #[get("/main_menu")]
-async fn main_menu(
-    cookies: &CookieJar<'_>,
-) -> Result<Markup, Redirect> {
+async fn main_menu(cookies: &CookieJar<'_>) -> Result<Markup, Redirect> {
     let session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
     let username = session.username.clone();
+    drop(session);
 
-    Ok(layout("The krusty Rabz - Lobby", html! {
+    Ok(layout("The krusty Rabz - Poker", html! {
         div class="flex min-h-screen" {
 
-            // ── Sidebar ──────────────────────────────────────────────────────
             aside class="fixed top-0 left-0 h-full w-60 flex flex-col z-10"
                 style="background:#111827; border-right:1px solid #1e2d3d;" {
 
-                // Logo
-                a href="/main_menu"
-                    class="px-6 py-5 flex items-center gap-2.5 transition-colors"
+                a hx-get="/main_menu" hx-target="body" hx-swap="innerHTML"
+                    class="px-6 py-5 flex items-center gap-2.5 cursor-pointer transition-colors"
                     style="border-bottom:1px solid #1e2d3d;"
                     onmouseover="this.style.background='#1e2d3d'"
                     onmouseout="this.style.background='transparent'" {
                     span class="text-xl" style="color:#42b883;" { "P" }
                     div {
-                        div class="font-bold text-white text-sm leading-tight" {
-                            "The krusty Rabz"
-                        }
+                        div class="font-bold text-white text-sm leading-tight" { "The krusty Rabz" }
                         div class="text-xs" style="color:#42b883;" { "Poker" }
                     }
                 }
 
-                // Nav
                 nav class="flex-1 px-3 py-4 flex flex-col gap-0.5" {
                     a hx-get="/list_and_join_games" hx-target="#main-content" hx-swap="innerHTML"
-                        class="flex items-center gap-3 px-3 py-2 rounded text-sm hover:bg-[#1e2d3d] text-gray-400 cursor-pointer" {
+                        class="flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] text-gray-400" {
                         span { "GB" } span { "Game Browser" }
                     }
-                    a hx-get="/list_and_join_games" hx-target="#main-content" hx-swap="innerHTML"
-                        class="flex items-center gap-3 px-3 py-2 rounded text-sm hover:bg-[#1e2d3d] text-gray-400 cursor-pointer" {
-                        span { "JR" } span { "Join Room" }
-                    }
                     a hx-get="/create_new_game" hx-target="#main-content" hx-swap="innerHTML"
-                        class="flex items-center gap-3 px-3 py-2 rounded text-sm hover:bg-[#1e2d3d] text-gray-400 cursor-pointer" {
+                        class="flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] text-gray-400" {
                         span { "+" } span { "Create Room" }
                     }
                     a hx-get="/watch_game" hx-target="#main-content" hx-swap="innerHTML"
-                        class="flex items-center gap-3 px-3 py-2 rounded text-sm hover:bg-[#1e2d3d] text-gray-400 cursor-pointer" {
+                        class="flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] text-gray-400" {
                         span { "SP" } span { "Spectate" }
                     }
                     a hx-get="/add_chips" hx-target="#main-content" hx-swap="innerHTML"
-                        class="flex items-center gap-3 px-3 py-2 rounded text-sm hover:bg-[#1e2d3d] text-gray-400 cursor-pointer" {
+                        class="flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] text-gray-400" {
                         span { "$" } span { "Credit Bureau" }
                     }
                 }
 
-                // User + status
                 div class="px-4 py-4 flex flex-col gap-3" style="border-top:1px solid #1e2d3d;" {
                     div class="flex items-center justify-between" {
                         span class="text-sm font-medium text-white" { (username) }
@@ -280,9 +271,7 @@ async fn main_menu(
                             class="text-xs transition-colors"
                             style="color:#4a5568;"
                             onmouseover="this.style.color='#f87171'"
-                            onmouseout="this.style.color='#4a5568'" {
-                            "Sign out"
-                        }
+                            onmouseout="this.style.color='#4a5568'" { "Sign out" }
                     }
                     div class="flex items-center" {
                         span class="text-xs" style="color:#4a5568;" { "The krusty Rabz Poker" }
@@ -290,61 +279,40 @@ async fn main_menu(
                 }
             }
 
-            // ── Main content area ─────────────────────────────────────────────
             main class="flex-1 ml-60 min-h-screen" style="background:#0f1117;" {
                 div id="main-content" class="min-h-screen flex flex-col items-center justify-center p-12" {
-                    // Hero
                     div class="text-center mb-10" {
-                        h1 class="text-5xl font-bold mb-1" style="color:white;" {
-                            "The krusty Rabz"
-                        }
+                        h1 class="text-5xl font-bold mb-1" style="color:white;" { "The krusty Rabz" }
                         p class="text-lg font-medium mb-1" style="color:#42b883;" { "Poker" }
-                        p class="text-sm" style="color:#4a5568;" {
-                            "Welcome to the ultimate poker experience!"
-                        }
+                        p class="text-sm" style="color:#4a5568;" { "Welcome to the ultimate poker experience!" }
                     }
 
-                    // Game info card
                     div class="rounded-2xl p-8 mb-8 w-full max-w-md"
                         style="background:#111827; border:1px solid #1e2d3d;" {
                         div class="flex justify-between items-start mb-6" {
                             div {
                                 div class="text-xs uppercase tracking-widest mb-1" style="color:#4a5568;" { "Game Type" }
-                                div class="text-2xl font-bold text-white" {
-                                    "Five Card Draw"
-                                }
-                                div class="text-xs mt-0.5" style="color:#4a5568;" { "Classic poker variant" }
+                                div class="text-2xl font-bold text-white" { "Dealer's Choice" }
+                                div class="text-xs mt-0.5" style="color:#4a5568;" { "All variants supported" }
                             }
                             div class="text-right" {
                                 div class="text-xs uppercase tracking-widest mb-1" style="color:#4a5568;" { "Players" }
-                                div class="text-2xl font-bold" style="color:#42b883;" { "2–10" }
+                                div class="text-2xl font-bold" style="color:#42b883;" { "2–9" }
                                 div class="text-xs mt-0.5" style="color:#4a5568;" { "Players per table" }
                             }
                         }
-                        // Play now = open create room
-                        button
-                            hx-get="/create_new_game"
-                            hx-target="#main-content"
-                            hx-swap="innerHTML"
-                            class="w-full py-3 rounded-xl font-bold text-base mb-3 cursor-pointer transition-colors"
+                        a hx-get="/create_new_game" hx-target="#main-content" hx-swap="innerHTML"
+                            class="block w-full py-3 rounded-xl font-bold text-base mb-3 text-center cursor-pointer transition-colors"
                             style="background:white; color:#0f1117;"
                             onmouseover="this.style.background='#e5e7eb'"
-                            onmouseout="this.style.background='white'" {
-                            "Play Now"
-                        }
-                        button
-                            hx-get="/list_and_join_games"
-                            hx-target="#main-content"
-                            hx-swap="innerHTML"
-                            class="w-full py-3 rounded-xl font-semibold text-sm cursor-pointer transition-colors"
+                            onmouseout="this.style.background='white'" { "Play Now" }
+                        a hx-get="/list_and_join_games" hx-target="#main-content" hx-swap="innerHTML"
+                            class="block w-full py-3 rounded-xl font-semibold text-sm text-center cursor-pointer transition-colors"
                             style="background:transparent; color:#42b883; border:1px solid #42b883;"
                             onmouseover="this.style.background='rgba(66,184,131,0.08)'"
-                            onmouseout="this.style.background='transparent'" {
-                            "Browse Games"
-                        }
+                            onmouseout="this.style.background='transparent'" { "Browse Games" }
                     }
 
-                    // Card preview
                     div class="flex gap-1 justify-center" {
                         (render_card("AS")) (render_card("KH")) (render_card("QD"))
                         (render_card("JC")) (render_card("10H"))
@@ -526,12 +494,25 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
                     @if !hand_started && state.player_count >= 2 {
                         form hx-post="/game/start_hand" hx-target="#game-state" hx-swap="outerHTML" {
                             input type="hidden" name="game_id" value=(game_id) {}
-                            button type="submit" 
+                            button type="submit"
                                 class="px-6 py-3 rounded-lg font-bold text-sm transition-colors"
                                 style="background:#42b883; color:#0f1117;"
                                 onmouseover="this.style.background='#33a070'"
-                                onmouseout="this.style.background='#42b883'" { 
-                                "Start Hand" 
+                                onmouseout="this.style.background='#42b883'" {
+                                "Start Hand"
+                            }
+                        }
+                        // Sit Out button — only relevant for Seven Card Stud
+                        @if state.game_type == GameType::SevenCardStud {
+                            form hx-post="/game/sit_out" hx-target="#game-state" hx-swap="outerHTML" {
+                                input type="hidden" name="game_id" value=(game_id) {}
+                                button type="submit"
+                                    class="px-6 py-3 rounded-lg font-semibold text-sm transition-colors"
+                                    style="background:transparent; color:#f87171; border:1px solid rgba(248,113,113,0.4);"
+                                    onmouseover="this.style.background='rgba(248,113,113,0.12)'"
+                                    onmouseout="this.style.background='transparent'" {
+                                    "Sit Out Hand"
+                                }
                             }
                         }
                     }
@@ -762,6 +743,181 @@ async fn play_game_fragment(
 
     match client.get_game(game_id, &session_owned.user_id).await {
         Ok(s) => Ok(render_game_fragment(game_id, &session_owned, &s)),
+        Err(_) => Err(rocket::http::Status::InternalServerError),
+    }
+}
+
+// ============================================================================
+// Spectator view
+// ============================================================================
+
+fn render_spectator_fragment(game_id: &str, state: &GameStateUpdate) -> Markup {
+    html! {
+        div id="spectator-state"
+            data-game-id=(game_id)
+            class="min-h-screen flex flex-col" style="background:#0f1117;" {
+
+            // Top nav
+            div class="flex items-center justify-between px-6 py-4 rounded-t-xl"
+                style="background:#1a2332; border-bottom:1px solid #2d3a4a;" {
+                div class="flex gap-4 items-center" {
+                    a href="/main_menu"
+                        class="text-sm font-semibold transition-colors"
+                        style="color:#42b883;"
+                        onmouseover="this.style.color='#33a070'"
+                        onmouseout="this.style.color='#42b883'" { "Lobby" }
+                    span class="px-2 py-0.5 rounded text-xs font-bold uppercase"
+                        style="background:rgba(99,179,237,0.15); color:#63b3ed; border:1px solid rgba(99,179,237,0.3);" {
+                        "Spectating"
+                    }
+                }
+                div class="flex gap-6 text-sm" {
+                    span style="color:#7a8fa6;" { "Table: " span class="font-mono text-xs" style="color:white;" { (game_id.chars().take(8).collect::<String>()) "..." } }
+                    span style="color:#7a8fa6;" { "Type: " span class="font-medium" style="color:white;" { (state.game_type) } }
+                    span style="color:#7a8fa6;" { "Round: " span class="font-medium" style="color:white;" { (state.betting_round) } }
+                    span class="font-semibold" style="color:#f6c90e;" { "Pot: $" (state.pot) }
+                }
+            }
+
+            // Winner banner
+            @if let Some(ref msg) = state.last_hand_message {
+                div class="px-6 py-4 text-center font-semibold text-sm"
+                    style="background:rgba(246,201,14,0.15); border-bottom:1px solid rgba(246,201,14,0.3); color:#f6c90e;" {
+                    (msg)
+                }
+            }
+
+            div class="flex-1 flex flex-col items-center justify-center p-6 gap-8" {
+
+                // All players
+                div class="flex gap-3 justify-center flex-wrap w-full" {
+                    @for player in &state.players {
+                        @let is_acting = state.action_on.as_deref() == Some(player.username.as_str());
+                        @let dimmed = if player.folded { "opacity-40" } else { "" };
+                        div class=(format!("flex flex-col items-center rounded-xl p-4 gap-2 {}", dimmed))
+                            style=(if is_acting {
+                                "background:#1a2332; border:2px solid #f6c90e;"
+                            } else {
+                                "background:#1a2332; border:1px solid #2d3a4a;"
+                            }) {
+                            div class="flex items-center gap-2" {
+                                span class="text-sm font-semibold" style="color:white;" { (player.username) }
+                                @if player.is_dealer {
+                                    span class="text-xs px-1.5 py-0.5 rounded font-bold" style="background:#f6c90e; color:#0f1117;" { "D" }
+                                }
+                                @if is_acting {
+                                    span class="text-xs px-1.5 py-0.5 rounded font-bold animate-pulse"
+                                        style="background:#3b82f6; color:white;" { "*" }
+                                }
+                            }
+                            div class="flex gap-1" {
+                                @for card_str in &player.face_up_cards {
+                                    (render_card(card_str))
+                                }
+                                @for _ in 0..(player.cards_count.saturating_sub(player.face_up_cards.len())) {
+                                    (render_card_back("blue"))
+                                }
+                            }
+                            div class="flex gap-3 text-xs" {
+                                span class="font-mono" style="color:#42b883;" { "$" (player.chips) }
+                                @if player.current_bet > 0 {
+                                    span class="font-mono" style="color:#f6c90e;" { "bet: $" (player.current_bet) }
+                                }
+                            }
+                            @if player.folded {
+                                span class="text-xs font-bold uppercase" style="color:#f87171;" { "Folded" }
+                            }
+                        }
+                    }
+                }
+
+                // Community cards
+                @if !state.community_cards.is_empty() {
+                    div class="flex flex-col items-center gap-3" {
+                        span class="text-xs uppercase tracking-widest" style="color:#4a5568;" { "Community Cards" }
+                        div class="flex gap-2 rounded-xl p-4" style="background:#1a2332; border:1px solid #2d3a4a;" {
+                            @for card in &state.community_cards {
+                                (render_card(card))
+                            }
+                        }
+                    }
+                }
+
+                @if state.players.is_empty() {
+                    span class="text-sm italic" style="color:#4a5568;" { "Waiting for players..." }
+                }
+            }
+        }
+    }
+}
+
+#[get("/spectate?<game_id>")]
+async fn spectate(
+    game_id: &str,
+    cookies: &CookieJar<'_>,
+    client: &State<PokerClient>,
+) -> Result<Markup, Redirect> {
+    let session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
+
+    // Register as viewer first (best-effort)
+    let _ = client.register_viewer(&session.user_id, game_id).await;
+
+    let game_state = match client.get_game(game_id, &session.user_id).await {
+        Ok(s) => s,
+        Err(_) => return Ok(layout("Error", html! {
+            div class="p-8 text-center" {
+                p class="text-red-400 mb-4" { "Could not load game state." }
+                a href="/main_menu" class="text-blue-400 hover:underline" { "Back to Lobby" }
+            }
+        })),
+    };
+
+    let gid = game_id.to_string();
+    let fragment = render_spectator_fragment(game_id, &game_state);
+
+    let sse_script = format!(r#"
+(function() {{
+    var gameId = {gid:?};
+    var sseUrl = 'http://127.0.0.1:8000/games/' + gameId + '/events';
+    var debounceTimer = null;
+
+    function refreshSpectator() {{
+        var target = document.getElementById('spectator-state');
+        if (!target) return;
+        htmx.ajax('GET', '/spectate_fragment?game_id=' + gameId, {{
+            target: target,
+            swap: 'outerHTML'
+        }});
+    }}
+
+    function scheduleRefresh() {{
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(refreshSpectator, 150);
+    }}
+
+    var es = new EventSource(sseUrl);
+    es.onopen = function() {{ scheduleRefresh(); }};
+    es.onmessage = function() {{ scheduleRefresh(); }};
+    es.onerror = function(e) {{ console.error('SSE error:', e); }};
+    window.addEventListener('beforeunload', function() {{ es.close(); }});
+}})();
+"#, gid = gid);
+
+    Ok(layout("Spectating", html! {
+        (fragment)
+        script { (PreEscaped(sse_script)) }
+    }))
+}
+
+#[get("/spectate_fragment?<game_id>")]
+async fn spectate_fragment(
+    game_id: &str,
+    cookies: &CookieJar<'_>,
+    client: &State<PokerClient>,
+) -> Result<Markup, rocket::http::Status> {
+    let session = get_session(cookies).ok_or(rocket::http::Status::Unauthorized)?;
+    match client.get_game(game_id, &session.user_id).await {
+        Ok(s) => Ok(render_spectator_fragment(game_id, &s)),
         Err(_) => Err(rocket::http::Status::InternalServerError),
     }
 }

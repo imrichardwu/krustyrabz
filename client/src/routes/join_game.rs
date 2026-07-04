@@ -15,8 +15,8 @@ pub async fn list_and_join_games(
 ) -> Result<Markup, Redirect> {
     let _session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
 
-    match client.list_games().await {
-        Ok(response) => Ok(html! {
+    let fragment = match client.list_games().await {
+        Ok(response) => html! {
             div class="w-full max-w-3xl" {
                 h2 class="text-2xl font-bold mb-6" style="color:#42b883;" { "Available Tables" }
                 @if response.games.is_empty() {
@@ -86,13 +86,14 @@ pub async fn list_and_join_games(
                     }
                 }
             }
-        }),
-        Err(_) => Ok(html! {
+        },
+        Err(_) => html! {
             div class="rounded-xl p-6" style="background:#1a2332; border:1px solid #2d3a4a;" {
                 p style="color:#f87171;" { "Failed to load games. Is the server running?" }
             }
-        }),
-    }
+        },
+    };
+    Ok(fragment)
 }
 
 #[derive(rocket::form::FromForm)]

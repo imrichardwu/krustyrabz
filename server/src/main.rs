@@ -80,6 +80,8 @@ fn rocket() -> _ {
                 house::perform_action,
                 house::get_stats,
                 house::add_chips,
+                house::withdraw_chips,
+                house::sit_out,
                 house::register_viewer,
                 house::get_rules,
                 house::game_events,

@@ -484,6 +484,22 @@ impl Game {
         }
     }
 
+    /// Marks a player as sitting out for the next hand (Seven Card Stud only).
+    pub fn sit_out_player(&mut self, player_id: Uuid) -> Result<(), String> {
+        match self {
+            Game::SevenCardStud(game) => game.sit_out_player(player_id),
+            _ => Err("Sit out is only available for Seven Card Stud".to_string()),
+        }
+    }
+
+    pub fn add_viewer(&mut self, viewer_id: Uuid) {
+        match self {
+            Game::FiveCardDraw(game) => game.core.table.add_viewer(viewer_id),
+            Game::SevenCardStud(game) => game.core.table.add_viewer(viewer_id),
+            Game::TexasHoldEm(game) => game.core.table.add_viewer(viewer_id),
+        }
+    }
+
     pub fn add_player(&mut self, player: Player) -> Result<(), String> {
         match self {
             Game::FiveCardDraw(game) => game
@@ -877,6 +893,7 @@ pub struct SevenCardStud {
     pub core: SharedGameState,
     pub betting_round: BettingRound,
     pub last_showdown: Option<Vec<(String, u32)>>,
+    pub sitting_out: Vec<Uuid>,
 }
 
 impl SevenCardStud {
@@ -886,7 +903,28 @@ impl SevenCardStud {
             core: SharedGameState::new(7),
             betting_round: BettingRound::PreDeal,
             last_showdown: None,
+            sitting_out: Vec::new(),
         }
+    }
+
+    /// Mark a player as sitting out for the next hand (opt out of ante).
+    /// Only allowed when no hand is in progress.
+    pub fn sit_out_player(&mut self, player_id: Uuid) -> Result<(), String> {
+        if self.betting_round != BettingRound::PreDeal {
+            return Err("Can only sit out before a hand starts".to_string());
+        }
+        if self.core.table.get_player(player_id).is_none() {
+            return Err("Player not found at table".to_string());
+        }
+        if !self.sitting_out.contains(&player_id) {
+            self.sitting_out.push(player_id);
+        }
+        Ok(())
+    }
+
+    /// Cancel a sit-out (player decides to play after all).
+    pub fn cancel_sit_out(&mut self, player_id: Uuid) {
+        self.sitting_out.retain(|&id| id != player_id);
     }
 
     fn get_suit_val(suit: poker_core::Suit) -> u8 {
@@ -958,19 +996,44 @@ impl SevenCardStud {
         best_id
     }
 
-    /// Deals 2 private cards + 1 face-up card to each player and starts Third Street.
+    /// Deals 2 private cards + 1 face-up card to each active (non-sitting-out) player
+    /// and starts Third Street. Collects a 50-chip ante from each active player.
     pub fn start_hand(&mut self) -> Result<(), String> {
         if self.betting_round != BettingRound::PreDeal {
             return Err("hand_already_started".to_string());
         }
-        if self.core.table.players.len() < 2 {
-            return Err("need_at_least_2_players".to_string());
+
+        // Determine which players are active (not sitting out)
+        let active_ids: Vec<Uuid> = self.core.table.players.iter()
+            .filter(|p| !self.sitting_out.contains(&p.id))
+            .map(|p| p.id)
+            .collect();
+
+        if active_ids.len() < 2 {
+            return Err("need_at_least_2_active_players".to_string());
         }
+
         self.last_showdown = None;
         self.core.deck.shuffle();
 
-        // Deal 2 down + 1 up to every player
+        // Collect 50-chip ante from each active player
+        const STUD_ANTE: u32 = 50;
+        for &pid in &active_ids {
+            let _ = self.core.post_bet(pid, STUD_ANTE);
+        }
+
+        // Fold sitting-out players so they are skipped in betting logic
         for player in &mut self.core.table.players {
+            if self.sitting_out.contains(&player.id) {
+                player.is_folded = true;
+            }
+        }
+
+        // Deal 2 down + 1 up to every active player only
+        for player in &mut self.core.table.players {
+            if self.sitting_out.contains(&player.id) {
+                continue;
+            }
             let mut three = self.core.deck.deal(3);
             if three.len() < 3 {
                 return Err("not_enough_cards".to_string());
@@ -981,13 +1044,16 @@ impl SevenCardStud {
             player.hand.add(Card::construct(up.rank, up.suit, CardType::Up));
         }
 
+        // Clear sit-outs — they apply only to one hand
+        self.sitting_out.clear();
+
         self.betting_round = BettingRound::ThirdStreet;
 
         self.core.action_on = self.find_lowest();
         if self.core.action_on.is_none() {
             return Err("no_up_cards_found".to_string());
         }
-        
+
         Ok(())
     }
 

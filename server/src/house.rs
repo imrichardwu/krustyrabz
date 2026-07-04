@@ -7,8 +7,9 @@ use uuid::Uuid;
 use crate::game::Game;
 use poker_core::{
     ActionRequest, AddChipsRequest, AddChipsResponse, CreateGameRequest,
-    GameListResponse, GameResponse, GameStateUpdate, GameSummary, GameType, 
+    GameListResponse, GameResponse, GameStateUpdate, GameSummary, GameType,
     HouseRules, JoinGameRequest, PlayerInfo, PlayerStats, ServerResponse,
+    WithdrawChipsRequest, WithdrawChipsResponse,
 };
 use poker_core::hand::Hand;
 use crate::player::Player;
@@ -23,6 +24,7 @@ use storage::repository::Repository;
 
 use crate::game::{FiveCardDraw, SevenCardStud, TexasHoldEm};
 use crate::betting::BettingRound as ServerBettingRound;
+use crate::betting::BettingRound;
 use poker_core::protocol::GameAction;
 use tokio::sync::broadcast;
 use rocket::response::stream::{Event, EventStream};
@@ -150,6 +152,9 @@ impl House {
                 // Try to join specific game
                 match games.get_mut(&id) {
                     Some(game) => {
+                        if game.get_betting_round() != BettingRound::PreDeal {
+                            return Err("Cannot join a game that is currently in progress".to_string());
+                        }
                         game.add_player(player)?;
                         Ok(id)
                     }
@@ -160,7 +165,10 @@ impl House {
                 // Find first available game of requested type
                 if let Some(requested_type) = game_type {
                     for (id, game) in games.iter_mut() {
-                        if game.get_game_type() == requested_type && !game.is_full() {
+                        if game.get_game_type() == requested_type
+                            && !game.is_full()
+                            && game.get_betting_round() == BettingRound::PreDeal
+                        {
                             match game.add_player(player.clone()) {
                                 Ok(_) => return Ok(id.clone()),
                                 Err(_) => continue,
@@ -756,15 +764,118 @@ pub async fn add_chips(
     }
 }
 
+/// Withdraws chips from a player's account.
+///
+/// Validates that the player has sufficient balance before deducting.
+///
+/// Request body should contain:
+///     - player_id: String
+///     - num_chips: u32
+#[post("/players/<player_id>/withdrawchips", format = "json", data = "<request>")]
+pub async fn withdraw_chips(
+    player_id: String,
+    request: Json<WithdrawChipsRequest>,
+) -> Json<WithdrawChipsResponse> {
+    let player_uuid = match Uuid::parse_str(&player_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return Json(WithdrawChipsResponse::error("Invalid player_id", Uuid::nil()));
+        }
+    };
+
+    let num_chips = request.num_chips;
+
+    let repo = match Repository::new().await {
+        Ok(r) => r,
+        Err(e) => {
+            return Json(WithdrawChipsResponse::error(
+                format!("Failed to create repository: {}", e),
+                player_uuid,
+            ));
+        }
+    };
+
+    let model = match repo.get_user_by_id(player_uuid).await {
+        Ok(m) => m,
+        Err(e) => {
+            return Json(WithdrawChipsResponse::error(
+                format!("User not found: {}", e),
+                player_uuid,
+            ));
+        }
+    };
+
+    let current_balance = model.token_balance.unwrap_or(0.0) as u32;
+    if num_chips > current_balance {
+        return Json(WithdrawChipsResponse::error(
+            format!("Insufficient balance (have {}, requested {})", current_balance, num_chips),
+            player_uuid,
+        ));
+    }
+
+    match repo.update_user_token_balance(player_uuid, -(num_chips as f64)).await {
+        Ok(updated) => Json(WithdrawChipsResponse::success(
+            "Chips withdrawn successfully",
+            player_uuid,
+            num_chips,
+            updated.token_balance.unwrap_or(0.0) as u32,
+        )),
+        Err(e) => Json(WithdrawChipsResponse::error(
+            format!("Failed to update balance: {}", e),
+            player_uuid,
+        )),
+    }
+}
+
+/// Marks a player as sitting out for the next hand (Seven Card Stud only).
+/// The player will not be dealt cards and will not pay the ante.
+#[post("/games/<game_id>/sitout", format = "json", data = "<request>")]
+pub async fn sit_out(
+    game_id: String,
+    request: Json<poker_core::SitOutRequest>,
+    house: &State<House>,
+) -> Json<ServerResponse> {
+    let player_uuid = match Uuid::parse_str(&request.player_id) {
+        Ok(id) => id,
+        Err(_) => return Json(ServerResponse::error("Invalid player_id")),
+    };
+
+    let mut games = house.live_games.lock().unwrap();
+    match games.get_mut(&game_id) {
+        Some(game) => match game.sit_out_player(player_uuid) {
+            Ok(_) => {
+                drop(games);
+                house.broadcast_game_state(&game_id);
+                Json(ServerResponse::success("Sitting out next hand"))
+            }
+            Err(e) => Json(ServerResponse::error(e)),
+        },
+        None => Json(ServerResponse::error("Game not found")),
+    }
+}
+
 /// Registers a viewer for a game.
 ///
-/// Minimal implementation: returns success without persisting (for five-card testing).
-#[post("/games/<_game_id>/viewers", format = "json", data = "<_request>")]
+/// Adds the viewer's UUID to the game's viewer list so they appear in game state.
+#[post("/games/<game_id>/viewers", format = "json", data = "<request>")]
 pub async fn register_viewer(
-    _game_id: String,
-    _request: Json<poker_core::ViewerRequest>,
+    game_id: String,
+    request: Json<poker_core::ViewerRequest>,
+    house: &State<House>,
 ) -> Json<ServerResponse> {
-    Json(ServerResponse::success("Viewer registered"))
+    let viewer_uuid = match Uuid::parse_str(&request.viewer_id) {
+        Ok(id) => id,
+        Err(_) => return Json(ServerResponse::error("Invalid viewer_id")),
+    };
+
+    let mut games = house.live_games.lock().unwrap();
+    match games.get_mut(&game_id) {
+        Some(game) => {
+            game.add_viewer(viewer_uuid);
+            Json(ServerResponse::success("Viewer registered"))
+        }
+        None => Json(ServerResponse::error("Game not found")),
+    }
 }
 
 /// SSE endpoint — browser connects once and receives a push event after every
