@@ -100,6 +100,30 @@ pub async fn check(
     Ok(render_game_fragment(game_id, &session_owned, &new_state))
 }
 
+#[post("/game/pass", data = "<req>")]
+pub async fn pass(
+    req: Form<GameIdForm>,
+    cookies: &CookieJar<'_>,
+    client: &State<PokerClient>,
+) -> Result<Markup, Redirect> {
+    let session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
+    let session_owned = session.clone();
+    drop(session);
+
+    let game_id = &req.game_id;
+    let user_id = &session_owned.user_id;
+
+    let new_state = match client.pass(user_id, game_id).await {
+        Ok(r) if r.game_state.is_some() => r.game_state.unwrap(),
+        _ => match client.get_game(game_id, user_id).await {
+            Ok(s) => s,
+            Err(_) => return Err(Redirect::to("/main_menu")),
+        },
+    };
+
+    Ok(render_game_fragment(game_id, &session_owned, &new_state))
+}
+
 #[post("/game/call", data = "<req>")]
 pub async fn call(
     req: Form<GameIdForm>,
@@ -220,5 +244,5 @@ pub async fn sit_out(
 }
 
 pub fn routes() -> Vec<rocket::Route> {
-    rocket::routes![start_hand, fold, check, call, bet, raise, draw, sit_out]
+    rocket::routes![start_hand, fold, check, pass, call, bet, raise, draw, sit_out]
 }

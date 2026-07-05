@@ -85,6 +85,7 @@ fn rocket() -> _ {
                 house::register_viewer,
                 house::get_rules,
                 house::game_events,
+                house::leave_game,
             ],
         )
 }

@@ -144,7 +144,7 @@ impl SharedGameState {
                 player.is_folded = true;
             }
 
-            poker_core::protocol::GameAction::Check => {
+            poker_core::protocol::GameAction::Check | poker_core::protocol::GameAction::Pass => {
                 if current_contribution < to_call {
                     return Err("cannot_check_must_call".to_string());
                 }

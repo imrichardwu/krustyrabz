@@ -91,17 +91,17 @@ impl HxRedirect {
 // Card rendering helpers
 // ============================================================================
 
-/// Render a face-up playing card from a code like "AS", "KH", "10D", "QC".
-/// Suit is always the last character (ASCII letter); rank is everything before it.
+/// Render a face-up playing card from a code like "A♠", "K♥", "10♦", "Q♣".
+/// Suit is always the last character (unicode symbol); rank is everything before it.
 pub fn render_card(card_str: &str) -> Markup {
     // Use char-boundary-safe split: subtract the byte length of the suit char
     let suit = card_str.chars().last().unwrap_or('?');
     let rank = &card_str[..card_str.len() - suit.len_utf8()];
     let (symbol, is_red) = match suit {
-        'S' => ("♠️", false),
-        'H' => ("♥️", true),
-        'D' => ("♦️", true),
-        'C' => ("♣️", false),
+        '♠' => ("♠", false),
+        '♥' => ("♥", true),
+        '♦' => ("♦", true),
+        '♣' => ("♣", false),
         _   => ("?", false),
     };
     let color = if is_red { "text-red-600" } else { "text-slate-800" };
@@ -377,6 +377,8 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
     let my_turn = state.action_on.as_deref() == Some(session.username.as_str());
     let is_drawing = state.betting_round == BettingRound::Drawing;
     let hand_started = !state.your_hand.is_empty();
+    // Leave is allowed only between hands or when the player has been eliminated (0 chips)
+    let can_leave = state.betting_round == BettingRound::PreDraw || state.your_chips == 0;
 
     html! {
         div id="game-state"
@@ -388,17 +390,21 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
             div class="flex items-center justify-between px-6 py-4 rounded-t-xl"
                 style="background:#1a2332; border-bottom:1px solid #2d3a4a;" {
                 div class="flex gap-4 items-center" {
-                    a href="/main_menu" 
-                        class="text-sm font-semibold transition-colors"
-                        style="color:#42b883;"
-                        onmouseover="this.style.color='#33a070'"
-                        onmouseout="this.style.color='#42b883'" { "Lobby" }
-                    form hx-post=(format!("/game/leave?game_id={}", game_id)) hx-confirm="Are you sure you want to leave this game?" {
-                        button type="submit" 
-                            class="text-sm font-semibold transition-colors"
-                            style="color:#f87171;"
-                            onmouseover="this.style.color='#ef4444'"
-                            onmouseout="this.style.color='#f87171'" {
+                    @if can_leave {
+                        form hx-post=(format!("/game/leave?game_id={}", game_id)) hx-confirm="Are you sure you want to leave this game?" {
+                            button type="submit"
+                                class="text-sm font-semibold transition-colors"
+                                style="color:#f87171;"
+                                onmouseover="this.style.color='#ef4444'"
+                                onmouseout="this.style.color='#f87171'" {
+                                "Leave Game"
+                            }
+                        }
+                    } @else {
+                        button type="button" disabled
+                            class="text-sm font-semibold cursor-not-allowed"
+                            style="color:#4a5568;"
+                            title="Cannot leave during an active hand" {
                             "Leave Game"
                         }
                     }
@@ -536,15 +542,17 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
                         }
 
                         @if state.current_bet == 0 {
-                            // Check (no bet to match)
-                            form hx-post="/game/check" hx-target="#game-state" hx-swap="outerHTML" {
+                            // Check / Pass (no bet to match)
+                            @let action_label = if state.game_type == GameType::SevenCardStud { "Pass" } else { "Check" };
+                            @let action_url = if state.game_type == GameType::SevenCardStud { "/game/pass" } else { "/game/check" };
+                            form hx-post=(action_url) hx-target="#game-state" hx-swap="outerHTML" {
                                 input type="hidden" name="game_id" value=(game_id) {}
-                                button type="submit" 
+                                button type="submit"
                                     class="px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors"
                                     style="background:rgba(66,184,131,0.15); color:#42b883; border:1px solid rgba(66,184,131,0.3);"
                                     onmouseover="this.style.background='rgba(66,184,131,0.3)'"
                                     onmouseout="this.style.background='rgba(66,184,131,0.15)'" {
-                                    "Check"
+                                    (action_label)
                                 }
                             }
 

@@ -179,6 +179,11 @@ impl PokerClient {
         self.perform_action(player_id, game_id, GameAction::Check).await
     }
 
+    /// Pass (equivalent to check; used in 7-Card Stud).
+    pub async fn pass(&self, player_id: &str, game_id: &str) -> Result<GameResponse, ApiError> {
+        self.perform_action(player_id, game_id, GameAction::Pass).await
+    }
+
     /// Call the current bet.
     pub async fn call(&self, player_id: &str, game_id: &str) -> Result<GameResponse, ApiError> {
         self.perform_action(player_id, game_id, GameAction::Call).await

@@ -330,6 +330,7 @@ impl std::fmt::Display for BettingRound {
 pub enum GameAction {
     Fold,
     Check,
+    Pass, // Equivalent to Check; used in 7-Card Stud to skip a betting round
     Call,
     Bet { amount: u32 },
     Raise { amount: u32 },
@@ -342,6 +343,7 @@ impl std::fmt::Display for GameAction {
         match self {
             GameAction::Fold => write!(f, "Fold"),
             GameAction::Check => write!(f, "Check"),
+            GameAction::Pass => write!(f, "Pass"),
             GameAction::Call => write!(f, "Call"),
             GameAction::Bet { amount } => write!(f, "Bet ${}", amount),
             GameAction::Raise { amount } => write!(f, "Raise ${}", amount),
