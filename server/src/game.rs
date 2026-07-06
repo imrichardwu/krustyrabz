@@ -688,6 +688,10 @@ impl FiveCardDraw {
             return Err("wrong_phase".to_string());
         }
 
+        if matches!(action, poker_core::protocol::GameAction::Pass) {
+            return Err("cannot_pass_first_round".to_string());
+        }
+
         let round_over = self.core.process_betting_action(player_id, action)?;
 
         // Check if only one player remains (everyone else folded/left)
@@ -1079,6 +1083,11 @@ impl SevenCardStud {
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
     ) -> Result<(), String> {
+
+        if self.betting_round == BettingRound::ThirdStreet && matches!(action, poker_core::protocol::GameAction::Pass) {
+            return Err("cannot_pass_first_round".to_string());
+        }
+
         let round_over = self.core.process_betting_action(player_id, action)?;
 
         // Last player standing wins immediately
@@ -1259,6 +1268,11 @@ impl TexasHoldEm {
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
     ) -> Result<(), String> {
+
+        if self.betting_round == BettingRound::PreFlop && matches!(action, poker_core::protocol::GameAction::Pass) {
+            return Err("cannot_pass_first_round".to_string());
+        }
+
         let round_over = self.core.process_betting_action(player_id, action)?;
 
         // Last player standing wins immediately

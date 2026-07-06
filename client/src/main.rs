@@ -44,7 +44,7 @@ pub fn set_session_cookie(cookies: &CookieJar<'_>, auth_session: AuthSession) {
 
 #[launch]
 fn rocket() -> _ {
-    let client = PokerClient::localhost();
+    let client = PokerClient::new("http://16.52.74.161:8000");
 
     rocket::build()
         .mount("/", routes![

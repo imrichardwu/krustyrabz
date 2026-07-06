@@ -198,6 +198,13 @@ impl Repository {
 
         self.get_user_by_id(id).await
     }
+    #[cfg(test)]
+    pub fn new_with_mock(db: DatabaseConnection) -> Self {
+    Self {
+        supabase_client: SupabaseClient::new("http://localhost".to_string(), "dummy".to_string()).unwrap(),
+        db,
+    }
+}
 }
 
 // Example usage functions - adjust based on supabase_rs API documentation
@@ -205,21 +212,115 @@ impl Repository {
 // Check https://docs.rs/supabase_rs for the exact API
 
 #[cfg(test)]
-mod tests {
+mod mock_tests {
     use super::*;
-    use std::env;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use uuid::Uuid;
 
-    /// Requires SUPABASE_URL and SUPABASE_KEY in environment or .env.
-    /// Run with: `cargo test -p storage --lib -- --ignored` when credentials are set.
-    #[tokio::test]
-    #[ignore = "requires SUPABASE_URL and SUPABASE_KEY in .env; run with --ignored when set"]
-    async fn test_create_client() {
-        dotenv().ok();
-        if env::var("SUPABASE_URL").is_err() || env::var("SUPABASE_KEY").is_err() {
-            eprintln!("Skipping test_create_client: SUPABASE_URL/SUPABASE_KEY not set");
-            return;
+    // Helper to generate a standardized mock user
+    fn generate_mock_user(id: Uuid, username: &str) -> crate::entities::user_account::Model {
+        crate::entities::user_account::Model {
+            id,
+            username: username.to_string(),
+            token_balance: Some(100.0),
+            rounds_played: Some(10),
+            pots_won: Some(3),
+            number_folds: Some(2),
+            game_id: None,
         }
-        let result = create_supabase_client().await;
-        assert!(result.is_ok(), "create_supabase_client failed: {:?}", result.err());
+    }
+
+    #[tokio::test]
+    async fn test_create_user_success() {
+        let test_id = Uuid::new_v4();
+        let expected_user = generate_mock_user(test_id, "NewPlayer");
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            //SELECT: check for existing user (returns empty)
+            .append_query_results(vec![Vec::<crate::entities::user_account::Model>::new()])
+            //INSERT
+            .append_query_results(vec![vec![expected_user.clone()]])
+            //SELECT: fetch via get_user_by_id
+            .append_query_results(vec![vec![expected_user.clone()]])
+            .into_connection();
+
+        let repo = Repository::new_with_mock(db);
+        let result = repo.create_user("NewPlayer".to_string(), test_id).await;
+
+        // Print the exact error if the mock queues are misaligned
+        if let Err(ref e) = result {
+            println!("DB Mock Error: {:?}", e);
+        }
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().username, "NewPlayer");
+    }
+
+    #[tokio::test]
+    async fn test_create_user_fails_on_duplicate_username() {
+        let test_id = Uuid::new_v4();
+        let existing_user = generate_mock_user(test_id, "ExistingPlayer");
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            //check for existing user (returns the user, triggering the failure)
+            .append_query_results(vec![vec![existing_user]])
+            .into_connection();
+
+        let repo = Repository::new_with_mock(db);
+        let result = repo.create_user("ExistingPlayer".to_string(), test_id).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Username 'ExistingPlayer' is already taken");
+    }
+
+    #[tokio::test]
+    async fn test_update_token_balance_success() {
+        let test_id = Uuid::new_v4();
+        let mut expected_user = generate_mock_user(test_id, "Player1");
+        expected_user.token_balance = Some(150.0); // Simulated updated balance
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(vec![MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_query_results(vec![vec![expected_user]])
+            .into_connection();
+
+        let repo = Repository::new_with_mock(db);
+        let result = repo.update_user_token_balance(test_id, 50.0).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().token_balance, Some(150.0));
+    }
+
+    #[tokio::test]
+    async fn test_increase_rounds_played_validation() {
+        let test_id = Uuid::new_v4();
+        
+        //don't even need a mock DB here because it should fail before the DB call
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let repo = Repository::new_with_mock(db);
+
+        //attempting to pass a negative round count
+        let result = repo.increase_rounds_played(test_id, -1).await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Parameter error: rounds can only be >= 0"));
+    }
+
+    #[tokio::test]
+    async fn test_increase_pots_won_success() {
+        let test_id = Uuid::new_v4();
+        let mut expected_user = generate_mock_user(test_id, "Winner");
+        expected_user.pots_won = Some(4);
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(vec![MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_query_results(vec![vec![expected_user]])
+            .into_connection();
+
+        let repo = Repository::new_with_mock(db);
+        let result = repo.increase_pots_won(test_id, 1).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().pots_won, Some(4));
     }
 }

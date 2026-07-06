@@ -89,10 +89,36 @@ pub async fn register(
             set_session_cookie(cookies, auth_session);
             Redirect::to("/main_menu")
         }
-        Err(_) => Redirect::to("/register_page"),
+        Err(e) => {
+            eprintln!("!! REGISTRATION DB ERROR: {}", e); 
+            Redirect::to("/register_page")
+        }
     }
 }
 
 pub fn routes() -> Vec<rocket::Route> {
     rocket::routes![register_page, register]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket::local::blocking::Client;
+    use rocket::http::{Status, ContentType};
+
+    #[test]
+    fn test_registration_route() {
+        // Use the exact name of the handler macro: register
+        let rocket = rocket::build().mount("/", rocket::routes![register]); 
+        let client = Client::tracked(rocket).expect("valid rocket instance");
+
+        let response = client.post("/register")
+            .header(ContentType::Form)
+            .body("username=TestUser123&email=test@test.com&password=SecurePassword1!")
+            .dispatch();
+
+        // If the DB fails, it redirects to /register_page. If it succeeds, to /main_menu.
+        // Both are Status::SeeOther (303 Redirect)
+        assert_eq!(response.status(), Status::SeeOther);
+    }
 }

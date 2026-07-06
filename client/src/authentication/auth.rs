@@ -220,9 +220,20 @@ pub async fn login_helper(_username: &str, password: &str, email: &str) -> Resul
 
     // Ensure UserAccount row exists (so create_game / join_game can find the user)
     if let Ok(user_uuid) = Uuid::parse_str(&session.user_id) {
-        if let Some(repo) = Repository::new().await.ok() {
-            if repo.get_user_by_id(user_uuid).await.is_err() {
-                let _ = repo.create_user(session.username.clone(), user_uuid).await;
+        
+        let repo = match Repository::new().await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("!! LOGIN FALLBACK DB CONNECTION FAILED: {}", e);
+                return Ok(session); 
+            }
+        };
+
+        if repo.get_user_by_id(user_uuid).await.is_err() {
+            if let Err(e) = repo.create_user(session.username.clone(), user_uuid).await {
+                eprintln!("!! LOGIN FALLBACK FAILED TO CREATE USER: {}", e);
+            } else {
+                println!("Recovered missing user account during login!");
             }
         }
     }

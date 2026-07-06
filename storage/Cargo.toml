@@ -10,7 +10,7 @@ path = "src/bin/migrate.rs"
 [dependencies]
 poker_core = { path = "../core" }
 serde = { version = "1.0", features = ["derive"] }
-sea-orm = { version = "0.12", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+sea-orm = { version = "0.12", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "mock"] }
 sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "chrono"] }
 tokio = { version = "1", features = ["full"] }
 supabase_rs = "=0.5.1"

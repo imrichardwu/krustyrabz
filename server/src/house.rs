@@ -346,6 +346,7 @@ pub async fn list_games(house: &State<House>) -> Json<GameListResponse> {
 pub async fn create_game(
     request: Json<CreateGameRequest>,
     house: &State<House>,
+    repo: &State<Repository>, // INJECTED STATE
 ) -> Json<GameResponse> {
     let inner_request = request.into_inner();
     let player_id = match Uuid::parse_str(&inner_request.player_id) {
@@ -353,11 +354,7 @@ pub async fn create_game(
         Err(_) => return Json(GameResponse::error("Invalid player_id".to_string())),
     };
 
-    let repo = match Repository::new().await {
-        Ok(r) => r,
-        Err(e) => return Json(GameResponse::error(format!("Failed to create repository: {}", e))),
-    };
-
+    // Direct pool query - No TCP Handshake!
     let model = match repo.get_user_by_id(player_id).await {
         Ok(m) => m,
         Err(e) => return Json(GameResponse::error(format!("User not found: {}", e))),
@@ -382,11 +379,14 @@ pub async fn create_game(
                 let game = games.get(&game_id).expect("just inserted");
                 build_game_state_update(game, Some(&inner_request.player_id))
             }; // games and hands locks released
+            
             house.create_event_channel(&game_id);
+            
             let message = format!(
                 "Game created successfully. Waiting for players in game {}",
                 game_id
             );
+            
             Json(GameResponse {
                 success: true,
                 message,
@@ -537,6 +537,7 @@ pub async fn perform_action(
     game_id: String,
     request: Json<ActionRequest>,
     house: &State<House>,
+    repo: &State<Repository>,
 ) -> Json<GameResponse> {
     let inner = request.into_inner();
     let player_id = match Uuid::parse_str(&inner.player_id) {
@@ -568,6 +569,7 @@ pub async fn perform_action(
                 GameAction::Bet { amount } => handle_bet(game, player_id, *amount),
                 GameAction::Raise { amount } => handle_raise(game, player_id, *amount),
                 GameAction::Draw { discard_indices } => handle_draw(game, player_id, discard_indices.clone()),
+                GameAction::Pass => handle_pass(game, player_id),
                 GameAction::AllIn => Err("AllIn not supported for Five Card Draw".to_string()),
             },
             poker_core::GameType::SevenCardStud | poker_core::GameType::TexasHoldEm => {
@@ -598,14 +600,7 @@ pub async fn perform_action(
     // Update database balances if showdown occurred
     if let Some(winners) = showdown_results {
         for (winner_id, winnings) in winners {
-            let repo = match Repository::new().await {
-                Ok(repo) => repo,
-                Err(e) => {
-                    eprintln!("Failed to create repository for winner {}: {}", winner_id, e);
-                    continue;
-                }
-            };
-
+            // No TCP handshakes in the loop
             if let Err(e) = repo.update_user_token_balance(winner_id, winnings as f64).await {
                 eprintln!("Failed to update balance for {}: {}", winner_id, e);
             } else {
@@ -625,7 +620,10 @@ pub async fn perform_action(
 
 /// Returns statistics for a specific player.
 #[get("/players/<player_id>/stats")]
-pub async fn get_stats(player_id: String) -> Json<PlayerStats> {
+pub async fn get_stats(
+    player_id: String, 
+    repo: &State<Repository>
+) -> Json<PlayerStats> {
     let player_uuid = match Uuid::parse_str(&player_id) {
         Ok(id) => id,
         Err(_) => {
@@ -641,21 +639,7 @@ pub async fn get_stats(player_id: String) -> Json<PlayerStats> {
         }
     };
 
-    let repo = match Repository::new().await {
-        Ok(r) => r,
-        Err(_) => {
-            return Json(poker_core::PlayerStats {
-                player_id,
-                username: "Unknown".to_string(),
-                rounds_played: 0,
-                pots_won: 0,
-                folds: 0,
-                total_winnings: 0,
-                current_balance: 0,
-            });
-        }
-    };
-
+    
     let model = match repo.get_user_by_id(player_uuid).await {
         Ok(m) => m,
         Err(_) => {
@@ -700,6 +684,7 @@ pub async fn get_stats(player_id: String) -> Json<PlayerStats> {
 pub async fn add_chips(
     player_id: String,
     request: Json<AddChipsRequest>,
+    repo: &State<Repository>,
 ) -> Json<AddChipsResponse> {
     let player_uuid = match Uuid::parse_str(&player_id) {
         Ok(id) => id,
@@ -715,16 +700,6 @@ pub async fn add_chips(
     let num_chips = request.num_chips;
     let credit_limit = request.credit_limit;
 
-    let repo = match Repository::new().await {
-        Ok(r) => r,
-        Err(e) => {
-            return Json(AddChipsResponse::error(
-                format!("Failed to create repository: {}", e),
-                player_uuid,
-                credit_limit,
-            ));
-        }
-    };
 
     let model = match repo.get_user_by_id(player_uuid).await {
         Ok(m) => m,
@@ -1166,6 +1141,20 @@ fn handle_draw(
 ) -> Result<(), String> {
     match game {
         Game::FiveCardDraw(g) => g.handle_draw_action(player_id, discard_indices),
+        _ => Err("only Five Card Draw supported".to_string()),
+    }
+}
+
+/// Handles a pass action (skipping a betting round if allowed)
+fn handle_pass(game: &mut Game, player_id: Uuid) -> Result<(), String> {
+    match game {
+        Game::FiveCardDraw(g) => match g.betting_round {
+            ServerBettingRound::PreDeal => Err("game_not_started".to_string()),
+            ServerBettingRound::PreDraw => g.predraw_betting(player_id, GameAction::Pass),
+            ServerBettingRound::PostDraw => g.postdraw_betting(player_id, GameAction::Pass),
+            ServerBettingRound::Drawing => Err("cannot_pass_in_draw_phase".to_string()),
+            _ => Err("wrong_phase".to_string()),
+        },
         _ => Err("only Five Card Draw supported".to_string()),
     }
 }

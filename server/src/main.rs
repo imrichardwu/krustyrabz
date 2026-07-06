@@ -14,8 +14,6 @@ pub mod player;
 pub mod table;
 
 use house::House;
-use storage::establish_connection;
-use storage::repository::create_supabase_client;
 use tokio::runtime::Runtime;
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::Header;
@@ -43,17 +41,15 @@ fn rocket() -> _ {
     println!("Starting Poker Server...");
     println!("Server will be available at http://127.0.0.1:8000");
 
-    // We need a Tokio runtime here to block the async call to establish_connection, 
+    // need a Tokio runtime here to block the async call to initialize the DB 
     // because [launch] functions cannot be async 
     let rt = Runtime::new().expect("Failed to create Tokio runtime"); 
-    let db = rt
-        .block_on(establish_connection())
-        .expect("Failed to establish connection"); 
-   
-    // We need to pass a supabase connection as managed state 
-    let client = rt
-        .block_on(create_supabase_client())
-        .expect("Failed to create client");
+    
+    // Use the runtime to block on the async Repository initialization.
+    // This internally creates the Supabase client and SeaORM connection.
+    let repo = rt
+        .block_on(storage::repository::Repository::new())
+        .expect("Failed to init DB");
 
     let house = House::new();
     let house_games = house.live_games.clone();
@@ -66,8 +62,7 @@ fn rocket() -> _ {
             println!("⏰ Timeout checker started (30s inactivity limit)");
         })))
         .manage(house)
-        .manage(db)
-        .manage(client)
+        .manage(repo)
         .mount(
             "/",
             routes![
