@@ -13,8 +13,8 @@ pub struct SignUpRequest {
     pub password: String,
 }
 
-#[get("/register_page")]
-pub async fn register_page() -> Markup {
+#[get("/register_page?<error>")]
+pub async fn register_page(error: Option<String>) -> Markup {
     layout("Register - Poker", html! {
         div class="min-h-screen flex items-center justify-center px-4" style="background:#0f1117;" {
             div class="w-full max-w-md" {
@@ -29,6 +29,13 @@ pub async fn register_page() -> Markup {
 
                 // Register form
                 div class="rounded-2xl p-8" style="background:#1a2332; border:1px solid #2d3a4a;" {
+                    @if let Some(err_msg) = error {
+                        div class="rounded-lg px-4 py-3 mb-5 text-sm font-medium" 
+                            style="background:rgba(248,113,113,0.12); color:#f87171; border:1px solid rgba(248,113,113,0.3);" {
+                            "⚠️ " (err_msg)
+                        }
+                    }
+
                     form action="/register" method="post" class="flex flex-col gap-5" {
                         div {
                             label class="block text-xs font-semibold uppercase tracking-widest mb-1.5" 
@@ -90,8 +97,8 @@ pub async fn register(
             Redirect::to("/main_menu")
         }
         Err(e) => {
-            eprintln!("!! REGISTRATION DB ERROR: {}", e); 
-            Redirect::to("/register_page")
+            let encoded_error = urlencoding::encode(&e);
+            Redirect::to(format!("/register_page?error={}", encoded_error))
         }
     }
 }

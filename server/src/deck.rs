@@ -41,3 +41,45 @@ impl DeckTrait for Deck {
         self.cards.drain(..min_draw).collect() 
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use poker_core::card::{Card, Rank, Suit}; 
+
+    #[test]
+    fn test_new_deck_has_52_cards() {
+        let deck = Deck::construct();
+        assert_eq!(deck.cards.len(), 52);
+    }
+
+    #[test]
+    fn test_deck_deals_correctly() {
+        let mut deck = Deck::construct();
+        let initial_size = deck.cards.len();
+        
+        let cards = deck.deal(1);
+        assert_eq!(cards.len(), 1);
+        assert_eq!(deck.cards.len(), initial_size - 1);
+    }
+
+    #[test]
+    fn test_empty_deck_returns_empty_vec() {
+        let mut deck = Deck::construct();
+        for _ in 0..52 {
+            deck.deal(1);
+        }
+        
+        assert!(deck.deal(1).is_empty());
+    }
+
+    #[test]
+    fn test_deck_shuffle_changes_order() {
+        let mut deck1 = Deck::construct();
+        let deck2 = Deck::construct();
+        
+        deck1.shuffle();
+        assert_ne!(deck1.cards, deck2.cards);
+        assert_eq!(deck1.cards.len(), 52);
+    }
+}

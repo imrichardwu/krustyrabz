@@ -133,18 +133,12 @@ pub async fn register_helper(email: &str, username: &str, password: &str) -> Res
     } else {
         // Registration failed - get error message
         match serde_json::from_str::<AuthError>(&response_text) {
-            Ok(error) => {
-                Err(format!("Registration failed: {}", error.message))
-            }
-            Err(_) => {
-                Err(format!("Registration failed with status {}: {}", status, response_text))
-            }
+            Ok(error) => Err(format!("Registration failed: {}", error.message)),
+            Err(_) => Err(format!("Registration failed with status {}: {}", status, response_text)),
         }
     }
 }
 
-
-/// Internal helper to login with credentials (used after Admin API user creation)
 async fn login_with_credentials(email: &str, password: &str) -> Result<AuthSession, String> {
     dotenv().ok();
     

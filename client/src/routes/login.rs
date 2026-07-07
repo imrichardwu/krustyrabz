@@ -12,8 +12,8 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-#[get("/login_page")]
-pub async fn login_page() -> Markup {
+#[get("/login_page?<error>")]
+pub async fn login_page(error: Option<String>) -> Markup {
     layout("Sign In - Poker", html! {
         div class="min-h-screen flex items-center justify-center px-4" style="background:#0f1117;" {
             div class="w-full max-w-md" {
@@ -28,6 +28,13 @@ pub async fn login_page() -> Markup {
 
                 // Login form
                 div class="rounded-2xl p-8" style="background:#1a2332; border:1px solid #2d3a4a;" {
+                    @if let Some(err_msg) = error {
+                        div class="rounded-lg px-4 py-3 mb-5 text-sm font-medium" 
+                            style="background:rgba(248,113,113,0.12); color:#f87171; border:1px solid rgba(248,113,113,0.3);" {
+                            "⚠️ " (err_msg)
+                        }
+                    }
+
                     form action="/login" method="post" class="flex flex-col gap-5" {
                         div {
                             label class="block text-xs font-semibold uppercase tracking-widest mb-1.5" 
@@ -79,7 +86,10 @@ pub async fn login(
             set_session_cookie(cookies, auth_session);
             Redirect::to("/main_menu")
         }
-        Err(_) => Redirect::to("/login_page"),
+        Err(e) => {
+            let encoded_error = urlencoding::encode(&e);
+            Redirect::to(format!("/login_page?error={}", encoded_error))
+        }
     }
 }
 
