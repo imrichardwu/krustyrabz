@@ -99,7 +99,7 @@ impl PokerClient {
     pub async fn leave_game(&self, player_id: &str, game_id: &str) -> Result<ServerResponse, ApiError> {
         let response = self            .client
             .post(format!("{}/games/{}/leave", self.base_url, game_id))
-            .json(&serde_json::json!({ "player_id": player_id }))
+            .json(&serde_json::json!({ "game_id": game_id, "username": "", "player_id": player_id }))
             .send()
             .await?
             .json()

@@ -234,6 +234,7 @@ impl House {
         let mut games = self.live_games.lock().unwrap();
         match games.get_mut(game_id) {
             Some(game) => {
+                println!("{:?}",format!("Successfully removed player: {:?} from game: {:?}", player_id, game_id)); 
                 game.remove_player(player_id)?;
                 if game.is_empty() {
                     games.remove(game_id);
@@ -446,7 +447,7 @@ pub async fn join_game(
 
 #[post("/games/<game_id>/leave", format = "json", data = "<request>")]
 pub async fn leave_game(
-    game_id: String,
+    game_id: String, 
     request: Json<JoinGameRequest>,
     house: &State<House>,
 ) -> Json<GameResponse> {
