@@ -234,8 +234,6 @@ impl House {
         let mut games = self.live_games.lock().unwrap();
         match games.get_mut(game_id) {
             Some(game) => {
-                println!("{:?}",format!("Successfully removed player: {:?} from game: {:?}", player_id, game_id)); 
-                game.remove_player(player_id)?;
                 if game.is_empty() {
                     games.remove(game_id);
                 }
