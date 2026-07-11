@@ -234,7 +234,9 @@ impl House {
         let mut games = self.live_games.lock().unwrap();
         match games.get_mut(game_id) {
             Some(game) => {
+                game.remove_player(player_id)?;
                 if game.is_empty() {
+                    println!("Removing empty game"); 
                     games.remove(game_id);
                 }
                 Ok(())
