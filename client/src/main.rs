@@ -44,7 +44,7 @@ pub fn set_session_cookie(cookies: &CookieJar<'_>, auth_session: AuthSession) {
 
 #[launch]
 fn rocket() -> _ {
-    let client = PokerClient::new("http://16.52.74.161:8000");
+    let client = PokerClient::localhost();//PokerClient::new("http://16.52.74.161:8000");
 
     rocket::build()
         .mount("/", routes![
@@ -508,6 +508,44 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
                                 "Start Hand"
                             }
                         }
+                    // Dealer's Choice variant selection 
+                    // At end of hand, dealer gets to choose the next hand's variant
+                    @if let Some(ref msg) = state.last_hand_message {
+                       @for player in state.players.iter().filter(|p| p.username == session.username) { 
+                           @if player.is_dealer {
+                               div {
+                                    label for="game_type" class="block text-xs font-semibold uppercase tracking-widest mb-1.5" style="color:#7a8fa6;" { "Game Variant" }
+                                    select name="game_type" id="game_type"
+                                        class="w-full rounded-lg px-3.5 py-2.5 text-sm focus:outline-none"
+                                        style="background:#0f1117; border:1px solid #2d3a4a; color:white;" {
+                                        option value="FiveCardDraw"  { "Five Card Draw" }
+                                        option value="SevenCardStud" { "Seven Card Stud" }
+                                        option value="TexasHoldEm"   { "Texas Hold'em" }
+                                    }
+                                }
+                               form hx-post="/game/dealer_choice" hx-target="#game-state" hx-swap="outerHTML" { 
+                                   input type="hidden" name="game_id" value=(game_id) { }
+                                   div {
+                                    label for="game_type" class="block text-xs font-semibold uppercase tracking-widest mb-1.5" style="color:#7a8fa6;" { "Game Variant" }
+                                    select name="game_type" id="game_type"
+                                        class="w-full rounded-lg px-3.5 py-2.5 text-sm focus:outline-none"
+                                        style="background:#0f1117; border:1px solid #2d3a4a; color:white;" {
+                                        option value="FiveCardDraw"  { "Five Card Draw" }
+                                        option value="SevenCardStud" { "Seven Card Stud" }
+                                        option value="TexasHoldEm"   { "Texas Hold'em" }
+                                        }
+                                   }
+                                   button type="submit" 
+                                        class="w-full font-bold py-3 rounded-lg transition-colors"
+                                        style="background:#42b883; color:#0f1117;"
+                                        onmouseover="this.style.background='#33a070'"
+                                        onmouseout="this.style.background='#42b883'" {
+                                        "Dealer's Choice"
+                                    }
+                               }
+                            }
+                       }
+                    }
                         // Sit Out button — only relevant for Seven Card Stud
                         @if state.game_type == GameType::SevenCardStud {
                             form hx-post="/game/sit_out" hx-target="#game-state" hx-swap="outerHTML" {

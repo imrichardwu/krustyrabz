@@ -5,7 +5,7 @@
 use poker_core::{
     ActionRequest, AddChipsRequest, AddChipsResponse, CreateGameRequest, GameAction, GameListResponse,
     GameResponse, GameStateUpdate, GameType, HouseRules, JoinGameRequest, ServerResponse,
-    SitOutRequest, ViewerRequest, WithdrawChipsRequest, WithdrawChipsResponse,
+    SitOutRequest, ViewerRequest, WithdrawChipsRequest, WithdrawChipsResponse, DealerChoiceRequest,
 };
 use reqwest::Client;
 
@@ -95,9 +95,31 @@ impl PokerClient {
         Ok(response)
     }
 
+    // "Dealer's Choice: dealer chooses the next hand's variant. 
+    pub async fn dealer_choice(
+        &self,
+        game_id: &str, 
+        game_type: &str,
+        )-> Result<GameResponse, ApiError> { 
+        let request = DealerChoiceRequest { 
+            game_id: game_id.to_string(), 
+            game_type: game_type.to_string(), 
+        }; 
+
+        let response = self 
+            .client 
+            .post(format!("{}/games/{}/dealer_choice", self.base_url, game_id))
+            .json(&request)
+            .send() 
+            .await?
+            .json()
+            .await?; 
+        Ok(response) 
+    }
+
     // Leave a game.
     pub async fn leave_game(&self, player_id: &str, game_id: &str) -> Result<ServerResponse, ApiError> {
-        let response = self            .client
+        let response = self.client
             .post(format!("{}/games/{}/leave", self.base_url, game_id))
             .json(&serde_json::json!({ "game_id": game_id, "username": "", "player_id": player_id }))
             .send()

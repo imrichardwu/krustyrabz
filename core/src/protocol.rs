@@ -26,6 +26,13 @@ pub struct JoinGameRequest {
     pub game_id: String,
 }
 
+/// Request to change the variant of an existing game. 
+#[derive(Debug, Clone, Serialize, Deserialize)] 
+pub struct DealerChoiceRequest {
+    pub game_id: String, 
+    pub game_type: String, 
+}
+
 /// Request to perform a game action.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionRequest {

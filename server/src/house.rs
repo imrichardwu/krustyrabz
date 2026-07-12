@@ -830,6 +830,27 @@ pub async fn sit_out(
     }
 }
 
+/// Executes a "Dealer's Choice": dealer chooses the next hand's variant. 
+#[post("/games/<game_id>/dealer_choice", format = "json", data = "<request>")] 
+pub async fn dealer_choice(
+    game_id: String, 
+    request: Json<poker_core::DealerChoiceRequest>, 
+    house: &State<House>, 
+)-> Json<ServerResponse> { 
+    let game_uuid = match Uuid::parse_str(game_id.as_str()) { 
+        Ok(id) => id, 
+        Err(_) => return Json(ServerResponse::error("Invalid game_id")), 
+    };
+
+    let mut games = house.live_games.lock().unwrap(); 
+    match games.get_mut(&game_id) { 
+        Some(game) => {
+            Json(ServerResponse::error("not yet implemented"))
+        }, 
+        None => Json(ServerResponse::error("not yet implemented"))
+    }
+}
+
 /// Registers a viewer for a game.
 ///
 /// Adds the viewer's UUID to the game's viewer list so they appear in game state.
