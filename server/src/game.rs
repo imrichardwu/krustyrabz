@@ -332,6 +332,30 @@ impl Game {
         }
     }
 
+    pub fn set_game_id(&mut self, game_id: Uuid) { 
+        match self { 
+             Game::FiveCardDraw(game) => game.game_id = game_id, 
+             Game::SevenCardStud(game) => game.game_id = game_id,  
+             Game::TexasHoldEm(game) => game.game_id = game_id, 
+        }
+    }
+
+    pub fn get_game_core(&self) -> SharedGameState { 
+        match self { 
+            Game::FiveCardDraw(game) => game.core.clone(), 
+            Game::SevenCardStud(game) => game.core.clone(), 
+            Game::TexasHoldEm(game) => game.core.clone(), 
+        }
+    }
+
+    pub fn set_game_core(&mut self, core: SharedGameState) { 
+        match self { 
+            Game::FiveCardDraw(game) => game.core = core, 
+            Game::SevenCardStud(game) => game.core = core,  
+            Game::TexasHoldEm(game) => game.core = core, 
+        }
+    }
+
     pub fn get_player_count(&self) -> usize {
         match self {
             Game::FiveCardDraw(game) => game.core.table.get_player_count(),
@@ -352,6 +376,23 @@ impl Game {
             Game::FiveCardDraw(game) => game.core.betting_state.clone(),
             Game::SevenCardStud(game) => game.core.betting_state.clone(),
             Game::TexasHoldEm(game) => game.core.betting_state.clone(),
+        }
+    }
+
+    pub fn get_swap_flag(&self) -> bool { 
+        match self { 
+            Game::FiveCardDraw(game) => game.swap_flag.clone(), 
+            Game::SevenCardStud(game) => game.swap_flag.clone(), 
+            Game::TexasHoldEm(game) => game.swap_flag.clone(), 
+        }
+    }
+
+    pub fn set_swap_flag(&mut self, flag: bool) { 
+        match self { 
+            Game::FiveCardDraw(game) => game.swap_flag = flag, 
+            Game::SevenCardStud(game) => game.swap_flag = flag, 
+            Game::TexasHoldEm(game) => 
+                game.swap_flag = flag, 
         }
     }
 
@@ -639,6 +680,9 @@ pub struct FiveCardDraw {
     pub last_showdown: Option<Vec<(String, u32)>>,
     /// Players who have already drawn this round (one draw per player per hand).
     pub drawn_this_round: Vec<Uuid>,
+    /// Dealer's choice flag, signals the client that the game type has changed
+    pub swap_flag: bool, 
+
 }
 
 impl FiveCardDraw {
@@ -649,6 +693,8 @@ impl FiveCardDraw {
             betting_round: BettingRound::PreDeal,
             last_showdown: None,
             drawn_this_round: Vec::new(),
+            swap_flag: false,
+
         }
     }
 
@@ -898,6 +944,7 @@ pub struct SevenCardStud {
     pub betting_round: BettingRound,
     pub last_showdown: Option<Vec<(String, u32)>>,
     pub sitting_out: Vec<Uuid>,
+    pub swap_flag: bool,
 }
 
 impl SevenCardStud {
@@ -908,6 +955,7 @@ impl SevenCardStud {
             betting_round: BettingRound::PreDeal,
             last_showdown: None,
             sitting_out: Vec::new(),
+            swap_flag: false,
         }
     }
 
@@ -1184,6 +1232,7 @@ pub struct TexasHoldEm {
     pub last_showdown: Option<Vec<(String, u32)>>,
     /// The shared community cards (flop/turn/river).
     pub community_cards: Vec<Card>,
+    pub swap_flag: bool,
 }
 
 impl TexasHoldEm {
@@ -1194,6 +1243,7 @@ impl TexasHoldEm {
             betting_round: BettingRound::PreDeal,
             last_showdown: None,
             community_cards: Vec::new(),
+            swap_flag: false,
         }
     }
 

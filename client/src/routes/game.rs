@@ -11,7 +11,13 @@ use crate::api::PokerClient;
 
 #[derive(rocket::form::FromForm)]
 pub struct GameIdForm {
-    pub game_id: String,
+    pub game_id: String, 
+}
+
+#[derive(rocket::form::FromForm)] 
+pub struct GameTypeForm { 
+    pub game_id: String, 
+    pub game_type: String, 
 }
 
 #[derive(rocket::form::FromForm)]
@@ -49,6 +55,30 @@ pub async fn start_hand(
         },
     };
 
+    Ok(render_game_fragment(game_id, &session_owned, &new_state))
+}
+
+#[post("/game/dealer_choice", data = "<req>")] 
+pub async fn dealer_choice(
+    req: Form<GameTypeForm>, 
+    cookies: &CookieJar<'_>, 
+    client: &State<PokerClient>, 
+)-> Result<Markup, Redirect> { 
+    let session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?; 
+    let session_owned = session.clone(); 
+    drop(session); 
+
+    let game_id = &req.game_id; 
+    let game_type = &req.game_type; 
+    let user_id = &session_owned.user_id; 
+
+    let new_state = match client.dealer_choice(game_id, game_type).await { 
+        Ok(r) if r.game_state.is_some() => r.game_state.unwrap(), 
+        _ => match client.get_game(game_id, user_id).await { 
+            Ok(s) => s, 
+            Err(_) => return Err(Redirect::to("/main_menu")), 
+        },
+    };
     Ok(render_game_fragment(game_id, &session_owned, &new_state))
 }
 
@@ -244,5 +274,5 @@ pub async fn sit_out(
 }
 
 pub fn routes() -> Vec<rocket::Route> {
-    rocket::routes![start_hand, fold, check, pass, call, bet, raise, draw, sit_out]
+    rocket::routes![start_hand, fold, check, pass, call, bet, raise, draw, sit_out, dealer_choice]
 }

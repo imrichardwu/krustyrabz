@@ -214,11 +214,13 @@ impl House {
     ///
     /// Returns:
     ///     Result<(), String>
-    pub fn remove_game(&self, game_id: &str) -> Result<(), String> {
+    pub fn remove_game(&self, game_id: &str, kill_stream: Option<bool>) -> Result<(), String> {
         let mut games = self.live_games.lock().unwrap();
         games.remove(game_id).ok_or(format!("Failed to remove game: {}", game_id))?;
         drop(games);
-        self.event_senders.lock().unwrap().remove(game_id);
+        if let Some(true) = kill_stream { 
+            self.event_senders.lock().unwrap().remove(game_id);
+        }
         Ok(())
     }
 
@@ -497,6 +499,7 @@ pub async fn start_hand(
             Some(g) => g,
             None => return Json(GameResponse::error("Game not found".to_string())),
         };
+        game.set_swap_flag(false);
         game.start_hand().map(|()| build_game_state_update(game, Some(&player_id_str)))
     }; // games lock released
 
@@ -841,13 +844,60 @@ pub async fn dealer_choice(
         Ok(id) => id, 
         Err(_) => return Json(ServerResponse::error("Invalid game_id")), 
     };
+    let game_type = request.game_type.as_str();
 
     let mut games = house.live_games.lock().unwrap(); 
     match games.get_mut(&game_id) { 
         Some(game) => {
-            Json(ServerResponse::error("not yet implemented"))
+            match game_type { 
+                "FiveCardDraw" => {
+                    if game.get_game_type() == GameType::FiveCardDraw { 
+                        return Json(ServerResponse::success("Nothing to do; game is already of the selected type")); 
+                    }
+                    let mut new_fcd = match house.create_new_game(GameType::FiveCardDraw) {
+        Ok(game) => game,
+        Err(e) => return Json(ServerResponse::error(format!("Failed to change game variant: {}", e))),
+    }; 
+                    new_fcd.set_game_id(game_uuid);
+                    new_fcd.set_game_core(game.get_game_core());
+                    new_fcd.set_swap_flag(true);
+                    games.remove(game_id.as_str()); 
+                    games.insert(game_id, new_fcd);
+                }, 
+                "SevenCardStud" => {
+                    if game.get_game_type() == GameType::SevenCardStud { 
+                        return Json(ServerResponse::success("Nothing to do; game is already of the selected type")); 
+                    }
+                    let mut new_scs = match house.create_new_game(GameType::SevenCardStud) {
+        Ok(game) => game,
+        Err(e) => return Json(ServerResponse::error(format!("Failed to change game variant: {}", e))),
+    };  
+                    new_scs.set_game_id(game_uuid);
+                    new_scs.set_game_core(game.get_game_core());
+                    new_scs.set_swap_flag(true); 
+                    games.remove(game_id.as_str());
+                    games.insert(game_id, new_scs);
+                }, 
+                "TexasHoldEm" => {
+                    if game.get_game_type() == GameType::TexasHoldEm { 
+                        return Json(ServerResponse::success("Nothing to do; game is already of the selected type")); 
+                    }
+                    let mut new_the = match house.create_new_game(GameType::TexasHoldEm) { 
+                        Ok(game) => game, 
+                        Err(e) => return Json(ServerResponse::error(format!("Failed to change game variant: {}", e))), 
+                    };
+                    new_the.set_game_id(game_uuid);
+                    new_the.set_game_core(game.get_game_core());
+                    new_the.set_swap_flag(true);
+                    games.remove(game_id.as_str());
+                    games.insert(game_id, new_the);
+                },
+                _ => { },
+            }
+            Json(ServerResponse::success("Successfully changed game variant"))
         }, 
-        None => Json(ServerResponse::error("not yet implemented"))
+        None => Json(ServerResponse::error("Failed to change game variant"))
+
     }
 }
 
@@ -976,6 +1026,8 @@ fn build_game_state_update(game: &Game, player_id: Option<&str>) -> GameStateUpd
         }
     });
 
+    let swap = game.get_swap_flag();
+
     GameStateUpdate {
         game_id: game.get_game_id().to_string(),
         game_type: game.get_game_type(),
@@ -989,6 +1041,7 @@ fn build_game_state_update(game: &Game, player_id: Option<&str>) -> GameStateUpd
         your_hand,
         your_chips,
         last_hand_message,
+        swap,
     }
 }
 

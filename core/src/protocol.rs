@@ -211,6 +211,7 @@ pub struct GameStateUpdate {
     pub your_hand: Vec<String>,
     pub your_chips: u32,
     pub last_hand_message: Option<String>,
+    pub swap: bool,
 }
 
 /// Information about a player visible to others.
