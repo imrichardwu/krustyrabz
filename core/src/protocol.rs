@@ -405,6 +405,7 @@ mod tests {
             your_hand: vec!["A♠".to_string(), "K♥".to_string()],
             your_chips: 500,
             last_hand_message: None,
+            swap: false, 
         };
         let r = GameResponse::success("Joined", "game-1".to_string(), state);
         assert!(r.success);
