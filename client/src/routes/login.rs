@@ -3,7 +3,7 @@ use rocket::http::CookieJar;
 use rocket::response::Redirect;
 use maud::{html, Markup};
 
-use crate::{set_session_cookie, layout};
+use crate::{set_session_cookie, get_session, layout};
 use crate::authentication::login_helper;
 
 #[derive(rocket::form::FromForm)]
@@ -13,8 +13,11 @@ pub struct LoginRequest {
 }
 
 #[get("/login_page?<error>")]
-pub async fn login_page(error: Option<String>) -> Markup {
-    layout("Sign In - Poker", html! {
+pub async fn login_page(error: Option<String>, cookies: &CookieJar<'_>) -> Result<Markup, Redirect> {
+    if get_session(cookies).is_some() {
+        return Err(Redirect::to("/main_menu"));
+    }
+    Ok(layout("Sign In - Poker", html! {
         div class="min-h-screen flex items-center justify-center px-4" style="background:#0f1117;" {
             div class="w-full max-w-md" {
                 // Header
@@ -73,7 +76,7 @@ pub async fn login_page(error: Option<String>) -> Markup {
                 }
             }
         }
-    })
+    }))
 }
 
 #[post("/login", data = "<login_req>")]
