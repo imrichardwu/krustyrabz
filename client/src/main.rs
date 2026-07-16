@@ -535,7 +535,29 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
                            }
                        }
                     }
-                                     
+                }
+                    
+                        // Skip betting round button
+                        @if state.betting_round != BettingRound::PreDraw && 
+                            state.betting_round != BettingRound::Turn &&
+                            state.betting_round != BettingRound::ThirdStreet &&
+                            state.betting_round != BettingRound::PreFlop &&
+                            state.betting_round != BettingRound::SixthStreet &&
+                            state.betting_round != BettingRound::Drawing &&
+                            my_turn {
+                            form hx-post="/game/pass" hx-target="#game-state" hx-swap="outerHTML" {
+                                input type="hidden" name="game_id" value=(game_id) {}
+                                button type="submit"
+                                    class="px-6 py-3 rounded-lg font-semibold text-sm transition-colors"
+                                    style="background:transparent; color:#f87171; border:1px solid rgba(248,113,113,0.4);"
+                                    onmouseover="this.style.background='rgba(248,113,113,0.12)'"
+                                    onmouseout="this.style.background='transparent'" {
+                                    "Skip"
+                                }
+                            }
+                        }
+                    
+          
                         // Sit Out button — only relevant for Seven Card Stud
                         @if state.game_type == GameType::SevenCardStud {
                             form hx-post="/game/sit_out" hx-target="#game-state" hx-swap="outerHTML" {
@@ -549,7 +571,7 @@ fn render_game_fragment(game_id: &str, session: &AuthSession, state: &GameStateU
                                 }
                             }
                         }
-                    }
+                    
 
                     @if !hand_started && state.player_count < 2 {
                         span class="text-sm italic" style="color:#4a5568;" { "Need at least 2 players to start" }
