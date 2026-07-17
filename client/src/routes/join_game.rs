@@ -8,14 +8,8 @@ use poker_core::GameStatus;
 use crate::{get_session, HxRedirect};
 use crate::api::PokerClient;
 
-#[get("/list_and_join_games")]
-pub async fn list_and_join_games(
-    client: &State<PokerClient>,
-    cookies: &CookieJar<'_>,
-) -> Result<Markup, Redirect> {
-    let _session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
-
-    let fragment = match client.list_games().await {
+pub async fn list_and_join_games_fragment(client: &PokerClient) -> Markup {
+    match client.list_games().await {
         Ok(response) => html! {
             div class="w-full max-w-3xl" {
                 h2 class="text-2xl font-bold mb-6" style="color:#42b883;" { "Available Tables" }
@@ -92,8 +86,16 @@ pub async fn list_and_join_games(
                 p style="color:#f87171;" { "Failed to load games. Is the server running?" }
             }
         },
-    };
-    Ok(fragment)
+    }
+}
+
+#[get("/list_and_join_games")]
+pub async fn list_and_join_games(
+    client: &State<PokerClient>,
+    cookies: &CookieJar<'_>,
+) -> Result<Markup, Redirect> {
+    let _session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
+    Ok(list_and_join_games_fragment(client).await)
 }
 
 #[derive(rocket::form::FromForm)]

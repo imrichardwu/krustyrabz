@@ -15,6 +15,10 @@ pub async fn add_chips(
     Ok(chips_form(None))
 }
 
+pub fn chips_fragment() -> Markup {
+    chips_form(None)
+}
+
 fn chips_form(message: Option<(String, bool)>) -> Markup {
     html! {
         div class="w-full max-w-md" {

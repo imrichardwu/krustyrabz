@@ -221,11 +221,63 @@ async fn logout(
 // Main menu
 // ============================================================================
 
-#[get("/main_menu")]
-async fn main_menu(cookies: &CookieJar<'_>) -> Result<Markup, Redirect> {
+fn render_main_menu_home() -> Markup {
+    html! {
+        div class="text-center mb-10" {
+            h1 class="text-5xl font-bold mb-1" style="color:white;" { "The krusty Rabz" }
+            p class="text-lg font-medium mb-1" style="color:#42b883;" { "Poker" }
+            p class="text-sm" style="color:#4a5568;" { "Welcome to the ultimate poker experience!" }
+        }
+
+        div class="rounded-2xl p-8 mb-8 w-full max-w-md"
+            style="background:#111827; border:1px solid #1e2d3d;" {
+            div class="flex justify-between items-start mb-6" {
+                div {
+                    div class="text-xs uppercase tracking-widest mb-1" style="color:#4a5568;" { "Game Type" }
+                    div class="text-2xl font-bold text-white" { "Dealer's Choice" }
+                    div class="text-xs mt-0.5" style="color:#4a5568;" { "All variants supported" }
+                }
+                div class="text-right" {
+                    div class="text-xs uppercase tracking-widest mb-1" style="color:#4a5568;" { "Players" }
+                    div class="text-2xl font-bold" style="color:#42b883;" { "2–9" }
+                    div class="text-xs mt-0.5" style="color:#4a5568;" { "Players per table" }
+                }
+            }
+            a hx-get="/create_new_game" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="/main_menu?tab=create"
+                class="block w-full py-3 rounded-xl font-bold text-base mb-3 text-center cursor-pointer transition-colors"
+                style="background:white; color:#0f1117;"
+                onmouseover="this.style.background='#e5e7eb'"
+                onmouseout="this.style.background='white'" { "Play Now" }
+            a hx-get="/list_and_join_games" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="/main_menu?tab=browse"
+                class="block w-full py-3 rounded-xl font-semibold text-sm text-center cursor-pointer transition-colors"
+                style="background:transparent; color:#42b883; border:1px solid #42b883;"
+                onmouseover="this.style.background='rgba(66,184,131,0.08)'"
+                onmouseout="this.style.background='transparent'" { "Browse Games" }
+        }
+
+        div class="flex gap-1 justify-center" {
+            (render_card("AS")) (render_card("KH")) (render_card("QD"))
+            (render_card("JC")) (render_card("10H"))
+        }
+    }
+}
+
+#[get("/main_menu?<tab>")]
+async fn main_menu(cookies: &CookieJar<'_>, client: &State<PokerClient>, tab: Option<String>) -> Result<Markup, Redirect> {
     let session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
     let username = session.username.clone();
+    let user_id = session.user_id.clone();
     drop(session);
+
+    let tab = tab.as_deref().unwrap_or("home");
+
+    let initial_content = match tab {
+        "browse"   => routes::join_game::list_and_join_games_fragment(client).await,
+        "create"   => routes::create_game::create_new_game_fragment(),
+        "spectate" => routes::watch_game::watch_game_fragment(client, &user_id).await,
+        "chips"    => routes::chips::chips_fragment(),
+        _          => render_main_menu_home(),
+    };
 
     Ok(layout("The krusty Rabz - Poker", html! {
         div class="flex min-h-screen" {
@@ -233,7 +285,7 @@ async fn main_menu(cookies: &CookieJar<'_>) -> Result<Markup, Redirect> {
             aside class="fixed top-0 left-0 h-full w-60 flex flex-col z-10"
                 style="background:#111827; border-right:1px solid #1e2d3d;" {
 
-                a hx-get="/main_menu" hx-target="body" hx-swap="innerHTML"
+                a hx-get="/main_menu" hx-target="body" hx-swap="innerHTML" hx-push-url="/main_menu"
                     class="px-6 py-5 flex items-center gap-2.5 cursor-pointer transition-colors"
                     style="border-bottom:1px solid #1e2d3d;"
                     onmouseover="this.style.background='#1e2d3d'"
@@ -246,20 +298,24 @@ async fn main_menu(cookies: &CookieJar<'_>) -> Result<Markup, Redirect> {
                 }
 
                 nav class="flex-1 px-3 py-4 flex flex-col gap-0.5" {
-                    a hx-get="/list_and_join_games" hx-target="#main-content" hx-swap="innerHTML"
-                        class="flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] text-gray-400" {
+                    @let browse_active = tab == "browse";
+                    @let create_active = tab == "create";
+                    @let spectate_active = tab == "spectate";
+                    @let chips_active = tab == "chips";
+                    a hx-get="/list_and_join_games" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="/main_menu?tab=browse"
+                        class=(format!("flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] {}", if browse_active { "bg-[#1e2d3d] text-white" } else { "text-gray-400" })) {
                         span { "GB" } span { "Game Browser" }
                     }
-                    a hx-get="/create_new_game" hx-target="#main-content" hx-swap="innerHTML"
-                        class="flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] text-gray-400" {
+                    a hx-get="/create_new_game" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="/main_menu?tab=create"
+                        class=(format!("flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] {}", if create_active { "bg-[#1e2d3d] text-white" } else { "text-gray-400" })) {
                         span { "+" } span { "Create Room" }
                     }
-                    a hx-get="/watch_game" hx-target="#main-content" hx-swap="innerHTML"
-                        class="flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] text-gray-400" {
+                    a hx-get="/watch_game" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="/main_menu?tab=spectate"
+                        class=(format!("flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] {}", if spectate_active { "bg-[#1e2d3d] text-white" } else { "text-gray-400" })) {
                         span { "SP" } span { "Spectate" }
                     }
-                    a hx-get="/add_chips" hx-target="#main-content" hx-swap="innerHTML"
-                        class="flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] text-gray-400" {
+                    a hx-get="/add_chips" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="/main_menu?tab=chips"
+                        class=(format!("flex items-center gap-3 px-3 py-2 rounded text-sm cursor-pointer hover:bg-[#1e2d3d] {}", if chips_active { "bg-[#1e2d3d] text-white" } else { "text-gray-400" })) {
                         span { "$" } span { "Credit Bureau" }
                     }
                 }
@@ -281,42 +337,7 @@ async fn main_menu(cookies: &CookieJar<'_>) -> Result<Markup, Redirect> {
 
             main class="flex-1 ml-60 min-h-screen" style="background:#0f1117;" {
                 div id="main-content" class="min-h-screen flex flex-col items-center justify-center p-12" {
-                    div class="text-center mb-10" {
-                        h1 class="text-5xl font-bold mb-1" style="color:white;" { "The krusty Rabz" }
-                        p class="text-lg font-medium mb-1" style="color:#42b883;" { "Poker" }
-                        p class="text-sm" style="color:#4a5568;" { "Welcome to the ultimate poker experience!" }
-                    }
-
-                    div class="rounded-2xl p-8 mb-8 w-full max-w-md"
-                        style="background:#111827; border:1px solid #1e2d3d;" {
-                        div class="flex justify-between items-start mb-6" {
-                            div {
-                                div class="text-xs uppercase tracking-widest mb-1" style="color:#4a5568;" { "Game Type" }
-                                div class="text-2xl font-bold text-white" { "Dealer's Choice" }
-                                div class="text-xs mt-0.5" style="color:#4a5568;" { "All variants supported" }
-                            }
-                            div class="text-right" {
-                                div class="text-xs uppercase tracking-widest mb-1" style="color:#4a5568;" { "Players" }
-                                div class="text-2xl font-bold" style="color:#42b883;" { "2–9" }
-                                div class="text-xs mt-0.5" style="color:#4a5568;" { "Players per table" }
-                            }
-                        }
-                        a hx-get="/create_new_game" hx-target="#main-content" hx-swap="innerHTML"
-                            class="block w-full py-3 rounded-xl font-bold text-base mb-3 text-center cursor-pointer transition-colors"
-                            style="background:white; color:#0f1117;"
-                            onmouseover="this.style.background='#e5e7eb'"
-                            onmouseout="this.style.background='white'" { "Play Now" }
-                        a hx-get="/list_and_join_games" hx-target="#main-content" hx-swap="innerHTML"
-                            class="block w-full py-3 rounded-xl font-semibold text-sm text-center cursor-pointer transition-colors"
-                            style="background:transparent; color:#42b883; border:1px solid #42b883;"
-                            onmouseover="this.style.background='rgba(66,184,131,0.08)'"
-                            onmouseout="this.style.background='transparent'" { "Browse Games" }
-                    }
-
-                    div class="flex gap-1 justify-center" {
-                        (render_card("AS")) (render_card("KH")) (render_card("QD"))
-                        (render_card("JC")) (render_card("10H"))
-                    }
+                    (initial_content)
                 }
             }
         }

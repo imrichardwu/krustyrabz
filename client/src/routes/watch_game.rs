@@ -8,16 +8,8 @@ use poker_core::GameStatus;
 use crate::{get_session, HxRedirect};
 use crate::api::PokerClient;
 
-#[get("/watch_game")]
-pub async fn watch_game(
-    client: &State<PokerClient>,
-    cookies: &CookieJar<'_>,
-) -> Result<Markup, Redirect> {
-    let session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
-    let user_id = session.user_id.clone();
-    drop(session);
-
-    let fragment = match client.list_games().await {
+pub async fn watch_game_fragment(client: &PokerClient, user_id: &str) -> Markup {
+    match client.list_games().await {
         Ok(response) => {
             let watchable: Vec<_> = response.games.iter()
                 .filter(|g| g.status != GameStatus::Finished)
@@ -94,8 +86,18 @@ pub async fn watch_game(
                 p style="color:#f87171;" { "Failed to load games." }
             }
         },
-    };
-    Ok(fragment)
+    }
+}
+
+#[get("/watch_game")]
+pub async fn watch_game(
+    client: &State<PokerClient>,
+    cookies: &CookieJar<'_>,
+) -> Result<Markup, Redirect> {
+    let session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
+    let user_id = session.user_id.clone();
+    drop(session);
+    Ok(watch_game_fragment(client, &user_id).await)
 }
 
 #[derive(rocket::form::FromForm)]
