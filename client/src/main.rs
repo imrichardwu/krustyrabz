@@ -3,6 +3,7 @@ mod authentication;
 pub mod routes;
 
 use crate::api::PokerClient;
+use dotenv::dotenv;
 pub use authentication::AuthSession;
 use rocket::http::{Cookie, CookieJar, Header, SameSite};
 use rocket::response::{Redirect, Responder};
@@ -44,7 +45,10 @@ pub fn set_session_cookie(cookies: &CookieJar<'_>, auth_session: AuthSession) {
 
 #[launch]
 fn rocket() -> _ {
-    let client = PokerClient::localhost();//PokerClient::new("http://16.52.74.161:8000");
+    dotenv().ok();
+    let server_url = std::env::var("SERVER_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8000".to_string());
+    let client = PokerClient::new(server_url);
 
     rocket::build()
         .mount("/", routes![
@@ -751,13 +755,14 @@ async fn play_game(
     };
 
     let gid = game_id.to_string();
+    let server_url = client.base_url().to_string();
     let fragment = render_game_fragment(game_id, &session_owned, &game_state);
 
     // SSE script: connect to server SSE, trigger HTMX fragment re-fetch on each event.
     let sse_script = format!(r#"
 (function() {{
     var gameId = {gid:?};
-    var sseUrl = 'http://127.0.0.1:8000/games/' + gameId + '/events';
+    var sseUrl = {server_url:?} + '/games/' + gameId + '/events';
     var debounceTimer = null;
 
     function isUserTyping() {{
@@ -798,7 +803,7 @@ async fn play_game(
 
     window.addEventListener('beforeunload', function() {{ es.close(); }});
 }})();
-"#, gid = gid);
+"#, gid = gid, server_url = server_url);
 
     Ok(layout("Play Poker", html! {
         (fragment)
@@ -952,12 +957,13 @@ async fn spectate(
     };
 
     let gid = game_id.to_string();
+    let server_url = client.base_url().to_string();
     let fragment = render_spectator_fragment(game_id, &game_state);
 
     let sse_script = format!(r#"
 (function() {{
     var gameId = {gid:?};
-    var sseUrl = 'http://127.0.0.1:8000/games/' + gameId + '/events';
+    var sseUrl = {server_url:?} + '/games/' + gameId + '/events';
     var debounceTimer = null;
 
     function refreshSpectator() {{
@@ -980,7 +986,7 @@ async fn spectate(
     es.onerror = function(e) {{ console.error('SSE error:', e); }};
     window.addEventListener('beforeunload', function() {{ es.close(); }});
 }})();
-"#, gid = gid);
+"#, gid = gid, server_url = server_url);
 
     Ok(layout("Spectating", html! {
         (fragment)

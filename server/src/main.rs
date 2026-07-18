@@ -29,7 +29,7 @@ impl Fairing for CorsFairing {
         Info { name: "CORS", kind: Kind::Response }
     }
     async fn on_response<'r>(&self, _req: &'r Request<'_>, res: &mut Response<'r>) {
-        res.set_header(Header::new("Access-Control-Allow-Origin", "http://127.0.0.1:8001"));
+        res.set_header(Header::new("Access-Control-Allow-Origin", "*"));
         res.set_header(Header::new("Access-Control-Allow-Methods", "GET, POST, OPTIONS"));
         res.set_header(Header::new("Access-Control-Allow-Headers", "Content-Type"));
     }
@@ -81,6 +81,7 @@ fn rocket() -> _ {
                 house::get_rules,
                 house::game_events,
                 house::leave_game,
+                house::dealer_choice,
             ],
         )
 }
