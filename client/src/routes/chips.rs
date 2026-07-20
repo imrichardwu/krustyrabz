@@ -1,16 +1,14 @@
+use maud::{Markup, html};
+use rocket::State;
 use rocket::form::Form;
 use rocket::http::CookieJar;
 use rocket::response::Redirect;
-use rocket::State;
-use maud::{html, Markup};
 
-use crate::{get_session};
 use crate::api::PokerClient;
+use crate::get_session;
 
 #[get("/add_chips")]
-pub async fn add_chips(
-    cookies: &CookieJar<'_>,
-) -> Result<Markup, Redirect> {
+pub async fn add_chips(cookies: &CookieJar<'_>) -> Result<Markup, Redirect> {
     let _session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
     Ok(chips_form(None))
 }
@@ -113,11 +111,17 @@ pub async fn add_chips_post(
 
     match client.add_chips(&user_id, req.amount).await {
         Ok(resp) if resp.success => Ok(chips_form(Some((
-            format!("Successfully deposited {} chips to your account!", req.amount),
+            format!(
+                "Successfully deposited {} chips to your account!",
+                req.amount
+            ),
             true,
         )))),
         Ok(resp) => Ok(chips_form(Some((resp.message, false)))),
-        Err(_) => Ok(chips_form(Some(("Failed to add chips. Please try again.".to_string(), false)))),
+        Err(_) => Ok(chips_form(Some((
+            "Failed to add chips. Please try again.".to_string(),
+            false,
+        )))),
     }
 }
 
@@ -133,11 +137,17 @@ pub async fn withdraw_chips_post(
 
     match client.withdraw_chips(&user_id, req.amount).await {
         Ok(resp) if resp.success => Ok(chips_form(Some((
-            format!("Successfully withdrew {} chips. New balance: {}.", resp.chips_withdrawn, resp.new_balance),
+            format!(
+                "Successfully withdrew {} chips. New balance: {}.",
+                resp.chips_withdrawn, resp.new_balance
+            ),
             true,
         )))),
         Ok(resp) => Ok(chips_form(Some((resp.message, false)))),
-        Err(_) => Ok(chips_form(Some(("Failed to withdraw chips. Please try again.".to_string(), false)))),
+        Err(_) => Ok(chips_form(Some((
+            "Failed to withdraw chips. Please try again.".to_string(),
+            false,
+        )))),
     }
 }
 

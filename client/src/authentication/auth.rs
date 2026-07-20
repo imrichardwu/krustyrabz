@@ -1,8 +1,66 @@
-use serde::{Deserialize, Serialize};
 use dotenv::dotenv;
+use serde::{Deserialize, Serialize};
 use std::env;
 use storage::Repository;
-use uuid::Uuid; 
+use thiserror::Error;
+use uuid::Uuid;
+
+/// Errors that can occur while registering or logging a user in.
+#[derive(Debug, Error)]
+pub enum AuthError {
+    #[error("{0} not found in .env file")]
+    MissingEnv(&'static str),
+
+    #[error("Password must be at least 6 characters long")]
+    PasswordTooShort,
+
+    #[error("Network error: {0}")]
+    Network(#[source] reqwest::Error),
+
+    #[error("Failed to read response: {0}")]
+    ReadResponse(#[source] reqwest::Error),
+
+    #[error("Failed to parse registration response: {0}")]
+    ParseRegistration(#[source] serde_json::Error),
+
+    #[error("Failed to parse response: {0}")]
+    ParseResponse(#[source] reqwest::Error),
+
+    #[error("Registration response missing access token")]
+    RegistrationMissingAccessToken,
+
+    #[error("Registration response missing refresh token")]
+    RegistrationMissingRefreshToken,
+
+    #[error("Login response missing access token")]
+    LoginMissingAccessToken,
+
+    #[error("Login response missing refresh token")]
+    LoginMissingRefreshToken,
+
+    #[error("Invalid user id from Supabase Auth")]
+    InvalidUserId,
+
+    #[error("Cannot connect to database. Set DATABASE_URL in .env (same as server). Error: {0}")]
+    DatabaseConnect(String),
+
+    #[error(
+        "User created in Supabase Auth but failed to create in app database (UserAccount). Run migrations: cargo run -p storage --bin migrate -- up. Error: {0}"
+    )]
+    CreateUserInDb(String),
+
+    #[error("Registration failed: {0}")]
+    RegistrationFailed(String),
+
+    #[error("Registration failed with status {status}: {body}")]
+    RegistrationFailedStatus {
+        status: reqwest::StatusCode,
+        body: String,
+    },
+
+    #[error("Login failed: {0}")]
+    LoginFailed(String),
+}
 
 /// Load .env so DATABASE_URL is set for Repository (UserAccount table).
 /// Tries current dir, then parent (project root when run from client/ or IDE).
@@ -52,31 +110,30 @@ struct UserInfo {
     user_metadata: Option<serde_json::Value>,
 }
 
-
 #[derive(Debug, Deserialize)]
-struct AuthError {
+struct AuthErrorResponse {
     message: String,
 }
 
-/// Internal helper to register a new user with Supabase Auth
-///
-/// # Returns
-/// - `Ok(AuthSession)` on success
-/// - `Err(String)` with error message on failure
-pub async fn register_helper(email: &str, username: &str, password: &str) -> Result<AuthSession, String> {
+/// Internal helper to register a new user with Supabase Auth.
+pub async fn register_helper(
+    email: &str,
+    username: &str,
+    password: &str,
+) -> Result<AuthSession, AuthError> {
     ensure_dotenv_loaded();
 
     // Get Supabase URL and anon key from environment
-    let supabase_url = env::var("SUPABASE_URL")
-        .map_err(|_| "SUPABASE_URL not found in .env file")?;
-    
-    let supabase_key = env::var("SUPABASE_KEY")
-        .map_err(|_| "SUPABASE_KEY not found in .env file")?;
-            
+    let supabase_url =
+        env::var("SUPABASE_URL").map_err(|_| AuthError::MissingEnv("SUPABASE_URL"))?;
+
+    let supabase_key =
+        env::var("SUPABASE_KEY").map_err(|_| AuthError::MissingEnv("SUPABASE_KEY"))?;
+
     if password.len() < 6 {
-        return Err("Password must be at least 6 characters long".to_string());
+        return Err(AuthError::PasswordTooShort);
     }
-        
+
     // Use regular signup endpoint (email confirmation disabled in Supabase settings)
     let signup_url = format!("{}/auth/v1/signup", supabase_url);
 
@@ -87,39 +144,56 @@ pub async fn register_helper(email: &str, username: &str, password: &str) -> Res
             "username": username
         }
     });
-    
+
     // Make HTTP POST request
     let client = reqwest::Client::new();
     let request = client
         .post(&signup_url)
         .header("Content-Type", "application/json")
         .header("apikey", &supabase_key);
-    
+
     let response = request
         .json(&request_body)
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
-    
-    let status = response.status();
-    let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
-    
-    if status.is_success() {
-        let auth_response: AuthResponse = serde_json::from_str(&response_text).map_err(|e| format!("Failed to parse registration response: {}", e))?;
-      
-        let access_token: String = auth_response.access_token.ok_or_else(|| "Registration response missing access token".to_string())?;
-        let refresh_token: String = auth_response.refresh_token.ok_or_else(|| "Registration response missing refresh token".to_string())?;
+        .map_err(AuthError::Network)?;
 
-        let session_username = auth_response.user.user_metadata.and_then(|m| m.get("username").and_then(|v| v.as_str().map(|s| s.to_string()))) .unwrap_or_else(|| username.to_string());
+    let status = response.status();
+    let response_text = response.text().await.map_err(AuthError::ReadResponse)?;
+
+    if status.is_success() {
+        let auth_response: AuthResponse =
+            serde_json::from_str(&response_text).map_err(AuthError::ParseRegistration)?;
+
+        let access_token: String = auth_response
+            .access_token
+            .ok_or(AuthError::RegistrationMissingAccessToken)?;
+        let refresh_token: String = auth_response
+            .refresh_token
+            .ok_or(AuthError::RegistrationMissingRefreshToken)?;
+
+        let session_username = auth_response
+            .user
+            .user_metadata
+            .and_then(|m| {
+                m.get("username")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
+            .unwrap_or_else(|| username.to_string());
 
         // Create user in app database (UserAccount table) so the server can find you when creating/joining games
-        let user_id = auth_response.user.id.parse::<Uuid>()
-            .map_err(|_| "Invalid user id from Supabase Auth".to_string())?;
-        let repository = Repository::new().await
-            .map_err(|e| format!("Cannot connect to database. Set DATABASE_URL in .env (same as server). Error: {}", e))?;
-        repository.create_user(session_username.clone(), user_id)
+        let user_id = auth_response
+            .user
+            .id
+            .parse::<Uuid>()
+            .map_err(|_| AuthError::InvalidUserId)?;
+        let repository = Repository::new()
             .await
-            .map_err(|e| format!("User created in Supabase Auth but failed to create in app database (UserAccount). Run migrations: cargo run -p storage --bin migrate -- up. Error: {}", e))?;
+            .map_err(|e| AuthError::DatabaseConnect(e.to_string()))?;
+        repository
+            .create_user(session_username.clone(), user_id)
+            .await
+            .map_err(|e| AuthError::CreateUserInDb(e.to_string()))?;
 
         println!("User '{}' registered successfully!", session_username);
 
@@ -132,28 +206,31 @@ pub async fn register_helper(email: &str, username: &str, password: &str) -> Res
         })
     } else {
         // Registration failed - get error message
-        match serde_json::from_str::<AuthError>(&response_text) {
-            Ok(error) => Err(format!("Registration failed: {}", error.message)),
-            Err(_) => Err(format!("Registration failed with status {}: {}", status, response_text)),
+        match serde_json::from_str::<AuthErrorResponse>(&response_text) {
+            Ok(error) => Err(AuthError::RegistrationFailed(error.message)),
+            Err(_) => Err(AuthError::RegistrationFailedStatus {
+                status,
+                body: response_text,
+            }),
         }
     }
 }
 
-async fn login_with_credentials(email: &str, password: &str) -> Result<AuthSession, String> {
+async fn login_with_credentials(email: &str, password: &str) -> Result<AuthSession, AuthError> {
     dotenv().ok();
-    
-    let supabase_url = env::var("SUPABASE_URL")
-        .map_err(|_| "SUPABASE_URL not found in .env file")?;
-    
-    let supabase_key = env::var("SUPABASE_KEY")
-        .map_err(|_| "SUPABASE_KEY not found in .env file")?;
-    
+
+    let supabase_url =
+        env::var("SUPABASE_URL").map_err(|_| AuthError::MissingEnv("SUPABASE_URL"))?;
+
+    let supabase_key =
+        env::var("SUPABASE_KEY").map_err(|_| AuthError::MissingEnv("SUPABASE_KEY"))?;
+
     let signin_url = format!("{}/auth/v1/token?grant_type=password", supabase_url);
     let request_body = SignInRequest {
         email: email.to_string(),
         password: password.to_string(),
     };
-    
+
     let client = reqwest::Client::new();
     let response = client
         .post(&signin_url)
@@ -162,27 +239,28 @@ async fn login_with_credentials(email: &str, password: &str) -> Result<AuthSessi
         .json(&request_body)
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
-    
+        .map_err(AuthError::Network)?;
+
     if response.status().is_success() {
-        let auth_response: AuthResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-        
-        let access_token = auth_response.access_token
-            .ok_or_else(|| "Login response missing access token".to_string())?;
-        let refresh_token = auth_response.refresh_token
-            .ok_or_else(|| "Login response missing refresh token".to_string())?;
-        
+        let auth_response: AuthResponse =
+            response.json().await.map_err(AuthError::ParseResponse)?;
+
+        let access_token = auth_response
+            .access_token
+            .ok_or(AuthError::LoginMissingAccessToken)?;
+        let refresh_token = auth_response
+            .refresh_token
+            .ok_or(AuthError::LoginMissingRefreshToken)?;
+
         let username = auth_response
             .user
             .user_metadata
-            .and_then(|m| m.get("username").and_then(|v| v.as_str().map(|s| s.to_string())))
+            .and_then(|m| {
+                m.get("username")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
             .unwrap_or_else(|| "User".to_string());
 
-
-        
         Ok(AuthSession {
             access_token,
             refresh_token,
@@ -191,35 +269,31 @@ async fn login_with_credentials(email: &str, password: &str) -> Result<AuthSessi
             username,
         })
     } else {
-        let error: AuthError = response
-            .json()
-            .await
-            .unwrap_or(AuthError {
-                message: "Invalid email or password".to_string(),
-            });
-        Err(format!("Login failed: {}", error.message))
+        let error: AuthErrorResponse = response.json().await.unwrap_or(AuthErrorResponse {
+            message: "Invalid email or password".to_string(),
+        });
+        Err(AuthError::LoginFailed(error.message))
     }
 }
 
-/// Login with existing credentials
-/// 
-/// # Returns
-/// - `Ok(AuthSession)` on success
-/// - `Err(String)` with error message on failure
-pub async fn login_helper(_username: &str, password: &str, email: &str) -> Result<AuthSession, String> {
+/// Login with existing credentials.
+pub async fn login_helper(
+    _username: &str,
+    password: &str,
+    email: &str,
+) -> Result<AuthSession, AuthError> {
     ensure_dotenv_loaded();
-    
+
     // Use the helper function
     let session = login_with_credentials(email, password).await?;
 
     // Ensure UserAccount row exists (so create_game / join_game can find the user)
     if let Ok(user_uuid) = Uuid::parse_str(&session.user_id) {
-        
         let repo = match Repository::new().await {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("!! LOGIN FALLBACK DB CONNECTION FAILED: {}", e);
-                return Ok(session); 
+                return Ok(session);
             }
         };
 

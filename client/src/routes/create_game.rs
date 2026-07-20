@@ -1,12 +1,12 @@
+use maud::{Markup, html};
+use poker_core::GameType;
+use rocket::State;
 use rocket::form::Form;
 use rocket::http::CookieJar;
 use rocket::response::Redirect;
-use rocket::State;
-use maud::{html, Markup};
-use poker_core::GameType;
 
-use crate::{get_session, HxRedirect};
 use crate::api::PokerClient;
+use crate::{HxRedirect, get_session};
 
 pub fn create_new_game_fragment() -> Markup {
     html! {
@@ -36,9 +36,7 @@ pub fn create_new_game_fragment() -> Markup {
 }
 
 #[get("/create_new_game")]
-pub async fn create_new_game(
-    cookies: &CookieJar<'_>,
-) -> Result<Markup, Redirect> {
+pub async fn create_new_game(cookies: &CookieJar<'_>) -> Result<Markup, Redirect> {
     let _session = get_session(cookies).ok_or_else(|| Redirect::to("/"))?;
     Ok(create_new_game_fragment())
 }
@@ -64,8 +62,8 @@ pub async fn start_game(
 
     let game_type = match req.game_type.as_str() {
         "SevenCardStud" => GameType::SevenCardStud,
-        "TexasHoldEm"   => GameType::TexasHoldEm,
-        _               => GameType::FiveCardDraw,
+        "TexasHoldEm" => GameType::TexasHoldEm,
+        _ => GameType::FiveCardDraw,
     };
 
     match client.create_game(&user_id, &username, game_type).await {

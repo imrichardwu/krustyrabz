@@ -1,11 +1,12 @@
 use crate::betting::{BettingRound, BettingState};
 use crate::deck::Deck;
+use crate::error::GameError;
 use crate::player::Player;
 use crate::table::Table;
 use poker_core::{Card, CardType, DeckTrait, GameStatus, GameType};
+use std::time::{Duration, Instant};
 use strum_macros::Display;
 use uuid::Uuid;
-use std::time::{Instant, Duration};
 
 #[derive(Debug, Clone)]
 pub struct SharedGameState {
@@ -97,15 +98,15 @@ impl SharedGameState {
         return false;
     }
 
-    pub fn post_bet(&mut self, player_id: Uuid, amount: u32) -> Result<(), &'static str> {
+    pub fn post_bet(&mut self, player_id: Uuid, amount: u32) -> Result<(), GameError> {
         // Lookup player
         let player = self
             .table
             .get_player_mut(player_id)
-            .ok_or("player_not_found")?;
+            .ok_or(GameError::PlayerNotFound)?;
 
         if amount > player.chips {
-            return Err("insufficient_funds");
+            return Err(GameError::InsufficientFunds);
         }
 
         player.chips -= amount; // Wallet decreases
@@ -129,9 +130,9 @@ impl SharedGameState {
         &mut self,
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, GameError> {
         if self.action_on != Some(player_id) {
-            return Err("not_your_turn".to_string());
+            return Err(GameError::NotYourTurn);
         }
 
         let player_idx = self.get_player_index(player_id).unwrap();
@@ -146,7 +147,7 @@ impl SharedGameState {
 
             poker_core::protocol::GameAction::Check | poker_core::protocol::GameAction::Pass => {
                 if current_contribution < to_call {
-                    return Err("cannot_check_must_call".to_string());
+                    return Err(GameError::CannotCheckMustCall);
                 }
             }
 
@@ -157,10 +158,10 @@ impl SharedGameState {
 
             poker_core::protocol::GameAction::Bet { amount } => {
                 if to_call > 0 {
-                    return Err("cannot_bet_must_raise".to_string());
+                    return Err(GameError::CannotBetMustRaise);
                 }
                 if amount < self.betting_state.min_raise {
-                    return Err("bet_too_small".to_string());
+                    return Err(GameError::BetTooSmall);
                 }
 
                 // Bet 10 means Raise To 10 (from 0)
@@ -172,10 +173,10 @@ impl SharedGameState {
 
             poker_core::protocol::GameAction::Raise { amount } => {
                 if to_call == 0 {
-                    return Err("cannot_raise_must_bet".to_string());
+                    return Err(GameError::CannotRaiseMustBet);
                 }
                 if amount < to_call + self.betting_state.min_raise {
-                    return Err("raise_too_small".to_string());
+                    return Err(GameError::RaiseTooSmall);
                 }
 
                 // "Raise To 50", in for 10, pay 40 more
@@ -187,7 +188,7 @@ impl SharedGameState {
                 self.betting_state.last_aggressor = Some(player_id);
             }
 
-            _ => return Err("invalid_action_for_betting_phase".to_string()),
+            _ => return Err(GameError::InvalidActionForBettingPhase),
         }
 
         let was_aggressor = self.betting_state.last_aggressor;
@@ -297,10 +298,6 @@ impl SharedGameState {
     }
 }
 
-// ============================================================================
-// Game Enum
-// ============================================================================
-
 /// This enum is a "generic variant" for populating the House's "live_games" vector,
 /// which is a heterogeneous data structure containing live or pending games of poker.
 /// Each game can be one of three different variants: FiveCardDraw, SevenCardStud,
@@ -332,27 +329,27 @@ impl Game {
         }
     }
 
-    pub fn set_game_id(&mut self, game_id: Uuid) { 
-        match self { 
-             Game::FiveCardDraw(game) => game.game_id = game_id, 
-             Game::SevenCardStud(game) => game.game_id = game_id,  
-             Game::TexasHoldEm(game) => game.game_id = game_id, 
+    pub fn set_game_id(&mut self, game_id: Uuid) {
+        match self {
+            Game::FiveCardDraw(game) => game.game_id = game_id,
+            Game::SevenCardStud(game) => game.game_id = game_id,
+            Game::TexasHoldEm(game) => game.game_id = game_id,
         }
     }
 
-    pub fn get_game_core(&self) -> SharedGameState { 
-        match self { 
-            Game::FiveCardDraw(game) => game.core.clone(), 
-            Game::SevenCardStud(game) => game.core.clone(), 
-            Game::TexasHoldEm(game) => game.core.clone(), 
+    pub fn get_game_core(&self) -> SharedGameState {
+        match self {
+            Game::FiveCardDraw(game) => game.core.clone(),
+            Game::SevenCardStud(game) => game.core.clone(),
+            Game::TexasHoldEm(game) => game.core.clone(),
         }
     }
 
-    pub fn set_game_core(&mut self, core: SharedGameState) { 
-        match self { 
-            Game::FiveCardDraw(game) => game.core = core, 
-            Game::SevenCardStud(game) => game.core = core,  
-            Game::TexasHoldEm(game) => game.core = core, 
+    pub fn set_game_core(&mut self, core: SharedGameState) {
+        match self {
+            Game::FiveCardDraw(game) => game.core = core,
+            Game::SevenCardStud(game) => game.core = core,
+            Game::TexasHoldEm(game) => game.core = core,
         }
     }
 
@@ -379,20 +376,19 @@ impl Game {
         }
     }
 
-    pub fn get_swap_flag(&self) -> bool { 
-        match self { 
-            Game::FiveCardDraw(game) => game.swap_flag.clone(), 
-            Game::SevenCardStud(game) => game.swap_flag.clone(), 
-            Game::TexasHoldEm(game) => game.swap_flag.clone(), 
+    pub fn get_swap_flag(&self) -> bool {
+        match self {
+            Game::FiveCardDraw(game) => game.swap_flag.clone(),
+            Game::SevenCardStud(game) => game.swap_flag.clone(),
+            Game::TexasHoldEm(game) => game.swap_flag.clone(),
         }
     }
 
-    pub fn set_swap_flag(&mut self, flag: bool) { 
-        match self { 
-            Game::FiveCardDraw(game) => game.swap_flag = flag, 
-            Game::SevenCardStud(game) => game.swap_flag = flag, 
-            Game::TexasHoldEm(game) => 
-                game.swap_flag = flag, 
+    pub fn set_swap_flag(&mut self, flag: bool) {
+        match self {
+            Game::FiveCardDraw(game) => game.swap_flag = flag,
+            Game::SevenCardStud(game) => game.swap_flag = flag,
+            Game::TexasHoldEm(game) => game.swap_flag = flag,
         }
     }
 
@@ -430,7 +426,7 @@ impl Game {
     }
 
     /// Starts a new hand for any supported game variant.
-    pub fn start_hand(&mut self) -> Result<(), String> {
+    pub fn start_hand(&mut self) -> Result<(), GameError> {
         match self {
             Game::FiveCardDraw(game) => game.start_hand(),
             Game::SevenCardStud(game) => game.start_hand(),
@@ -443,9 +439,9 @@ impl Game {
         &mut self,
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
-    ) -> Result<(), String> {
+    ) -> Result<(), GameError> {
         match self {
-            Game::FiveCardDraw(_) => Err("use per-action handlers for Five Card Draw".to_string()),
+            Game::FiveCardDraw(_) => Err(GameError::UsePerActionHandlers),
             Game::SevenCardStud(game) => game.handle_action(player_id, action),
             Game::TexasHoldEm(game) => game.handle_action(player_id, action),
         }
@@ -526,10 +522,10 @@ impl Game {
     }
 
     /// Marks a player as sitting out for the next hand (Seven Card Stud only).
-    pub fn sit_out_player(&mut self, player_id: Uuid) -> Result<(), String> {
+    pub fn sit_out_player(&mut self, player_id: Uuid) -> Result<(), GameError> {
         match self {
             Game::SevenCardStud(game) => game.sit_out_player(player_id),
-            _ => Err("Sit out is only available for Seven Card Stud".to_string()),
+            _ => Err(GameError::SitOutOnlySevenCardStud),
         }
     }
 
@@ -541,30 +537,32 @@ impl Game {
         }
     }
 
-    pub fn add_player(&mut self, player: Player) -> Result<(), String> {
+    pub fn add_player(&mut self, player: Player) -> Result<(), GameError> {
         match self {
             Game::FiveCardDraw(game) => game
                 .core
                 .table
                 .seat_player(player)
-                .map_err(|e| e.to_string()),
+                .map_err(|e| GameError::Table(e.to_string())),
             Game::SevenCardStud(game) => game
                 .core
                 .table
                 .seat_player(player)
-                .map_err(|e| e.to_string()),
+                .map_err(|e| GameError::Table(e.to_string())),
             Game::TexasHoldEm(game) => game
                 .core
                 .table
                 .seat_player(player)
-                .map_err(|e| e.to_string()),
+                .map_err(|e| GameError::Table(e.to_string())),
         }
     }
 
     /// Check if the current player's turn has timed out (30 seconds).
     /// Returns Some(player_id) if timeout occurred, None otherwise.
     pub fn check_timeout(&self, timeout_duration: Duration) -> Option<Uuid> {
-        if let (Some(player_id), Some(started_at)) = (self.get_action_on(), self.get_action_started_at()) {
+        if let (Some(player_id), Some(started_at)) =
+            (self.get_action_on(), self.get_action_started_at())
+        {
             if started_at.elapsed() > timeout_duration {
                 return Some(player_id);
             }
@@ -573,16 +571,16 @@ impl Game {
     }
 
     /// Auto-fold a player due to timeout.
-    pub fn timeout_player(&mut self, player_id: Uuid) -> Result<(), String> {
+    pub fn timeout_player(&mut self, player_id: Uuid) -> Result<(), GameError> {
         use poker_core::protocol::GameAction;
-        
+
         match self {
             Game::FiveCardDraw(game) => {
                 // Auto-fold the player
                 match game.betting_round {
                     BettingRound::PreDraw => game.predraw_betting(player_id, GameAction::Fold),
                     BettingRound::PostDraw => game.postdraw_betting(player_id, GameAction::Fold),
-                    _ => Err("Not in a betting phase".to_string()),
+                    _ => Err(GameError::NotInBettingPhase),
                 }
             }
             Game::SevenCardStud(game) => {
@@ -590,7 +588,7 @@ impl Game {
                 if game.betting_round != BettingRound::PreDeal {
                     game.handle_action(player_id, GameAction::Fold)
                 } else {
-                    Err("Not in a betting phase".to_string())
+                    Err(GameError::NotInBettingPhase)
                 }
             }
             Game::TexasHoldEm(game) => {
@@ -598,19 +596,19 @@ impl Game {
                 if game.betting_round != BettingRound::PreDeal {
                     game.handle_action(player_id, GameAction::Fold)
                 } else {
-                    Err("Not in a betting phase".to_string())
+                    Err(GameError::NotInBettingPhase)
                 }
             }
         }
     }
 
-    pub fn remove_player(&mut self, player_id: Uuid) -> Result<(), String> {
+    pub fn remove_player(&mut self, player_id: Uuid) -> Result<(), GameError> {
         match self {
             Game::FiveCardDraw(game) => {
                 game.core
                     .table
                     .remove_player_from_table(player_id)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| GameError::Table(e.to_string()))?;
                 // If a hand is in progress and only 1 player remains, that player auto-wins.
                 if game.betting_round != BettingRound::PreDeal && game.core.table.players.len() == 1
                 {
@@ -631,7 +629,7 @@ impl Game {
                 game.core
                     .table
                     .remove_player_from_table(player_id)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| GameError::Table(e.to_string()))?;
                 if game.betting_round != BettingRound::PreDeal && game.core.table.players.len() == 1
                 {
                     let winner_id = game.core.table.players[0].id;
@@ -649,7 +647,7 @@ impl Game {
                 game.core
                     .table
                     .remove_player_from_table(player_id)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| GameError::Table(e.to_string()))?;
                 if game.betting_round != BettingRound::PreDeal && game.core.table.players.len() == 1
                 {
                     let winner_id = game.core.table.players[0].id;
@@ -667,10 +665,6 @@ impl Game {
     }
 }
 
-// ============================================================================
-// Five Card Draw
-// ============================================================================
-
 #[derive(Debug, Clone)]
 pub struct FiveCardDraw {
     pub game_id: Uuid,
@@ -681,8 +675,7 @@ pub struct FiveCardDraw {
     /// Players who have already drawn this round (one draw per player per hand).
     pub drawn_this_round: Vec<Uuid>,
     /// Dealer's choice flag, signals the client that the game type has changed
-    pub swap_flag: bool, 
-
+    pub swap_flag: bool,
 }
 
 impl FiveCardDraw {
@@ -694,24 +687,23 @@ impl FiveCardDraw {
             last_showdown: None,
             drawn_this_round: Vec::new(),
             swap_flag: false,
-
         }
     }
 
     /// Deals 5 cards to each player and transitions to PreDraw betting.
-    pub fn start_hand(&mut self) -> Result<(), String> {
+    pub fn start_hand(&mut self) -> Result<(), GameError> {
         if self.betting_round != BettingRound::PreDeal {
-            return Err("hand_already_started".to_string());
+            return Err(GameError::HandAlreadyStarted);
         }
         if self.core.table.players.len() < 2 {
-            return Err("need_at_least_2_players".to_string());
+            return Err(GameError::NeedAtLeast2Players);
         }
         self.last_showdown = None; // clear previous hand result
         self.core.deck.shuffle();
         for player in &mut self.core.table.players {
             let cards = self.core.deck.deal(5);
             if cards.len() != 5 {
-                return Err("not_enough_cards".to_string());
+                return Err(GameError::NotEnoughCards);
             }
             for card in cards {
                 player.hand.add(card);
@@ -720,7 +712,7 @@ impl FiveCardDraw {
         self.betting_round = BettingRound::PreDraw;
         self.core.action_on = None;
         if !self.core.advance_action(false) {
-            return Err("no_active_players".to_string());
+            return Err(GameError::NoActivePlayers);
         }
         Ok(())
     }
@@ -729,13 +721,13 @@ impl FiveCardDraw {
         &mut self,
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
-    ) -> Result<(), String> {
+    ) -> Result<(), GameError> {
         if self.betting_round != BettingRound::PreDraw {
-            return Err("wrong_phase".to_string());
+            return Err(GameError::WrongPhase);
         }
 
         if matches!(action, poker_core::protocol::GameAction::Pass) {
-            return Err("cannot_pass_first_round".to_string());
+            return Err(GameError::CannotPassFirstRound);
         }
 
         let round_over = self.core.process_betting_action(player_id, action)?;
@@ -780,9 +772,9 @@ impl FiveCardDraw {
         &mut self,
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
-    ) -> Result<(), String> {
+    ) -> Result<(), GameError> {
         if self.betting_round != BettingRound::PostDraw {
-            return Err("wrong_phase".to_string());
+            return Err(GameError::WrongPhase);
         }
 
         let round_over = self.core.process_betting_action(player_id, action)?;
@@ -878,20 +870,20 @@ impl FiveCardDraw {
         &mut self,
         player_id: Uuid,
         discard_indices: Vec<usize>,
-    ) -> Result<(), String> {
+    ) -> Result<(), GameError> {
         if self.core.action_on != Some(player_id) {
-            return Err("not_your_turn".to_string());
+            return Err(GameError::NotYourTurn);
         }
         if self.betting_round != BettingRound::Drawing {
-            return Err("wrong_phase_expecting_drawing".to_string());
+            return Err(GameError::WrongPhaseExpectingDrawing);
         }
         // Five Card Draw: each player gets exactly one draw per hand
         if self.drawn_this_round.contains(&player_id) {
-            return Err("already_drew_this_round".to_string());
+            return Err(GameError::AlreadyDrewThisRound);
         }
 
         if discard_indices.len() > 5 {
-            return Err("too_many_discards".to_string());
+            return Err(GameError::TooManyDiscards);
         }
 
         let mut unique_indices = discard_indices.clone();
@@ -933,10 +925,6 @@ impl FiveCardDraw {
     }
 }
 
-// ============================================================================
-// Seven Card Stud
-// ============================================================================
-
 #[derive(Debug, Clone)]
 pub struct SevenCardStud {
     pub game_id: Uuid,
@@ -961,12 +949,12 @@ impl SevenCardStud {
 
     /// Mark a player as sitting out for the next hand (opt out of ante).
     /// Only allowed when no hand is in progress.
-    pub fn sit_out_player(&mut self, player_id: Uuid) -> Result<(), String> {
+    pub fn sit_out_player(&mut self, player_id: Uuid) -> Result<(), GameError> {
         if self.betting_round != BettingRound::PreDeal {
-            return Err("Can only sit out before a hand starts".to_string());
+            return Err(GameError::SitOutBeforeHandStarts);
         }
         if self.core.table.get_player(player_id).is_none() {
-            return Err("Player not found at table".to_string());
+            return Err(GameError::PlayerNotFoundAtTable);
         }
         if !self.sitting_out.contains(&player_id) {
             self.sitting_out.push(player_id);
@@ -1050,19 +1038,23 @@ impl SevenCardStud {
 
     /// Deals 2 private cards + 1 face-up card to each active (non-sitting-out) player
     /// and starts Third Street. Collects a 50-chip ante from each active player.
-    pub fn start_hand(&mut self) -> Result<(), String> {
+    pub fn start_hand(&mut self) -> Result<(), GameError> {
         if self.betting_round != BettingRound::PreDeal {
-            return Err("hand_already_started".to_string());
+            return Err(GameError::HandAlreadyStarted);
         }
 
         // Determine which players are active (not sitting out)
-        let active_ids: Vec<Uuid> = self.core.table.players.iter()
+        let active_ids: Vec<Uuid> = self
+            .core
+            .table
+            .players
+            .iter()
             .filter(|p| !self.sitting_out.contains(&p.id))
             .map(|p| p.id)
             .collect();
 
         if active_ids.len() < 2 {
-            return Err("need_at_least_2_active_players".to_string());
+            return Err(GameError::NeedAtLeast2ActivePlayers);
         }
 
         self.last_showdown = None;
@@ -1088,12 +1080,22 @@ impl SevenCardStud {
             }
             let mut three = self.core.deck.deal(3);
             if three.len() < 3 {
-                return Err("not_enough_cards".to_string());
+                return Err(GameError::NotEnoughCards);
             }
             let up = three.pop().unwrap();
-            player.hand.add(Card::construct(three[0].rank, three[0].suit, CardType::Private));
-            player.hand.add(Card::construct(three[1].rank, three[1].suit, CardType::Private));
-            player.hand.add(Card::construct(up.rank, up.suit, CardType::Up));
+            player.hand.add(Card::construct(
+                three[0].rank,
+                three[0].suit,
+                CardType::Private,
+            ));
+            player.hand.add(Card::construct(
+                three[1].rank,
+                three[1].suit,
+                CardType::Private,
+            ));
+            player
+                .hand
+                .add(Card::construct(up.rank, up.suit, CardType::Up));
         }
 
         // Clear sit-outs — they apply only to one hand
@@ -1103,7 +1105,7 @@ impl SevenCardStud {
 
         self.core.action_on = self.find_lowest();
         if self.core.action_on.is_none() {
-            return Err("no_up_cards_found".to_string());
+            return Err(GameError::NoUpCardsFound);
         }
 
         Ok(())
@@ -1114,15 +1116,15 @@ impl SevenCardStud {
         &mut self,
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
-    ) -> Result<(), String> {
+    ) -> Result<(), GameError> {
         match self.betting_round {
-            BettingRound::PreDeal => Err("game_not_started".to_string()),
+            BettingRound::PreDeal => Err(GameError::GameNotStarted),
             BettingRound::ThirdStreet
             | BettingRound::FourthStreet
             | BettingRound::FifthStreet
             | BettingRound::SixthStreet
             | BettingRound::SeventhStreet => self.street_betting(player_id, action),
-            _ => Err("wrong_phase".to_string()),
+            _ => Err(GameError::WrongPhase),
         }
     }
 
@@ -1130,10 +1132,11 @@ impl SevenCardStud {
         &mut self,
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
-    ) -> Result<(), String> {
-
-        if self.betting_round == BettingRound::ThirdStreet && matches!(action, poker_core::protocol::GameAction::Pass) {
-            return Err("cannot_pass_first_round".to_string());
+    ) -> Result<(), GameError> {
+        if self.betting_round == BettingRound::ThirdStreet
+            && matches!(action, poker_core::protocol::GameAction::Pass)
+        {
+            return Err(GameError::CannotPassFirstRound);
         }
 
         let round_over = self.core.process_betting_action(player_id, action)?;
@@ -1146,10 +1149,18 @@ impl SevenCardStud {
 
         if round_over {
             match self.betting_round {
-                BettingRound::ThirdStreet => self.deal_next_street(BettingRound::FourthStreet, CardType::Up),
-                BettingRound::FourthStreet => self.deal_next_street(BettingRound::FifthStreet, CardType::Up),
-                BettingRound::FifthStreet => self.deal_next_street(BettingRound::SixthStreet, CardType::Up),
-                BettingRound::SixthStreet => self.deal_next_street(BettingRound::SeventhStreet, CardType::Private),
+                BettingRound::ThirdStreet => {
+                    self.deal_next_street(BettingRound::FourthStreet, CardType::Up)
+                }
+                BettingRound::FourthStreet => {
+                    self.deal_next_street(BettingRound::FifthStreet, CardType::Up)
+                }
+                BettingRound::FifthStreet => {
+                    self.deal_next_street(BettingRound::SixthStreet, CardType::Up)
+                }
+                BettingRound::SixthStreet => {
+                    self.deal_next_street(BettingRound::SeventhStreet, CardType::Private)
+                }
                 BettingRound::SeventhStreet => self.transition_to_showdown(),
                 _ => {}
             }
@@ -1164,7 +1175,9 @@ impl SevenCardStud {
         for player in &mut self.core.table.players {
             if !player.is_folded {
                 if let Some(raw) = self.core.deck.deal(1).into_iter().next() {
-                    player.hand.add(Card::construct(raw.rank, raw.suit, card_type));
+                    player
+                        .hand
+                        .add(Card::construct(raw.rank, raw.suit, card_type));
                 }
             }
         }
@@ -1217,10 +1230,6 @@ impl SevenCardStud {
     }
 }
 
-// ============================================================================
-// Texas Hold'em
-// ============================================================================
-
 const SMALL_BLIND: u32 = 5;
 const BIG_BLIND: u32 = 10;
 
@@ -1248,12 +1257,12 @@ impl TexasHoldEm {
     }
 
     /// Posts blinds, deals 2 private hole cards to each player, and starts PreFlop.
-    pub fn start_hand(&mut self) -> Result<(), String> {
+    pub fn start_hand(&mut self) -> Result<(), GameError> {
         if self.betting_round != BettingRound::PreDeal {
-            return Err("hand_already_started".to_string());
+            return Err(GameError::HandAlreadyStarted);
         }
         if self.core.table.players.len() < 2 {
-            return Err("need_at_least_2_players".to_string());
+            return Err(GameError::NeedAtLeast2Players);
         }
         self.last_showdown = None;
         self.community_cards.clear();
@@ -1266,12 +1275,13 @@ impl TexasHoldEm {
         let bb_id = self.core.table.players[bb_idx].id;
 
         // Post blinds (best-effort; player may not have enough chips)
-        let _ = self.core.post_bet(sb_id, SMALL_BLIND.min(
-            self.core.table.players[sb_idx].chips
-        ));
-        let _ = self.core.post_bet(bb_id, BIG_BLIND.min(
-            self.core.table.players[bb_idx].chips
-        ));
+        let _ = self.core.post_bet(
+            sb_id,
+            SMALL_BLIND.min(self.core.table.players[sb_idx].chips),
+        );
+        let _ = self
+            .core
+            .post_bet(bb_id, BIG_BLIND.min(self.core.table.players[bb_idx].chips));
 
         // BB acts as the initial "aggressor" so PreFlop ends correctly
         self.core.betting_state.to_call = BIG_BLIND;
@@ -1281,10 +1291,12 @@ impl TexasHoldEm {
         for player in &mut self.core.table.players {
             let cards = self.core.deck.deal(2);
             if cards.len() < 2 {
-                return Err("not_enough_cards".to_string());
+                return Err(GameError::NotEnoughCards);
             }
             for card in cards {
-                player.hand.add(Card::construct(card.rank, card.suit, CardType::Private));
+                player
+                    .hand
+                    .add(Card::construct(card.rank, card.suit, CardType::Private));
             }
         }
 
@@ -1292,7 +1304,7 @@ impl TexasHoldEm {
         // Start action at UTG (player after BB)
         self.core.action_on = Some(bb_id);
         if !self.core.advance_action(false) {
-            return Err("no_active_players".to_string());
+            return Err(GameError::NoActivePlayers);
         }
         Ok(())
     }
@@ -1302,14 +1314,14 @@ impl TexasHoldEm {
         &mut self,
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
-    ) -> Result<(), String> {
+    ) -> Result<(), GameError> {
         match self.betting_round {
-            BettingRound::PreDeal => Err("game_not_started".to_string()),
+            BettingRound::PreDeal => Err(GameError::GameNotStarted),
             BettingRound::PreFlop
             | BettingRound::Flop
             | BettingRound::Turn
             | BettingRound::River => self.round_betting(player_id, action),
-            _ => Err("wrong_phase".to_string()),
+            _ => Err(GameError::WrongPhase),
         }
     }
 
@@ -1317,10 +1329,11 @@ impl TexasHoldEm {
         &mut self,
         player_id: Uuid,
         action: poker_core::protocol::GameAction,
-    ) -> Result<(), String> {
-
-        if self.betting_round == BettingRound::PreFlop && matches!(action, poker_core::protocol::GameAction::Pass) {
-            return Err("cannot_pass_first_round".to_string());
+    ) -> Result<(), GameError> {
+        if self.betting_round == BettingRound::PreFlop
+            && matches!(action, poker_core::protocol::GameAction::Pass)
+        {
+            return Err(GameError::CannotPassFirstRound);
         }
 
         let round_over = self.core.process_betting_action(player_id, action)?;
@@ -1357,9 +1370,15 @@ impl TexasHoldEm {
         }
     }
 
-    fn deal_flop(&mut self) { self.deal_community(3, BettingRound::Flop); }
-    fn deal_turn(&mut self) { self.deal_community(1, BettingRound::Turn); }
-    fn deal_river(&mut self) { self.deal_community(1, BettingRound::River); }
+    fn deal_flop(&mut self) {
+        self.deal_community(3, BettingRound::Flop);
+    }
+    fn deal_turn(&mut self) {
+        self.deal_community(1, BettingRound::Turn);
+    }
+    fn deal_river(&mut self) {
+        self.deal_community(1, BettingRound::River);
+    }
 
     fn award_last_player(&mut self) {
         if let Some(winner) = self.core.table.players.iter().find(|p| !p.is_folded) {
@@ -1414,17 +1433,12 @@ impl TexasHoldEm {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use poker_core::protocol::GameAction;
     use poker_core::{Card, CardType, Rank, Suit};
     use uuid::Uuid;
-
-    // ========================================================================
-    // Helpers
-    // ========================================================================
 
     fn mock_player(name: &str, chips: u32) -> Player {
         Player {
@@ -1438,15 +1452,11 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // SharedGameState Engine Tests
-    // ========================================================================
-
     #[test]
     fn test_shared_state_betting_validation() {
         let mut core = SharedGameState::new(5);
-        let mut p1 = mock_player("Alice", 100);
-        let mut p2 = mock_player("Bob", 100);
+        let p1 = mock_player("Alice", 100);
+        let p2 = mock_player("Bob", 100);
         let id1 = p1.id;
         let id2 = p2.id;
 
@@ -1459,7 +1469,7 @@ mod tests {
         core.betting_state.to_call = 10;
         let check_err = core.process_betting_action(id1, GameAction::Check);
         assert!(check_err.is_err());
-        assert_eq!(check_err.unwrap_err(), "cannot_check_must_call");
+        assert_eq!(check_err.unwrap_err().to_string(), "cannot_check_must_call");
 
         // P1 Calls the 10
         assert!(core.process_betting_action(id1, GameAction::Call).is_ok());
@@ -1469,7 +1479,7 @@ mod tests {
         // Action moved to P2. P2 tries to bet instead of raise
         let bet_err = core.process_betting_action(id2, GameAction::Bet { amount: 20 });
         assert!(bet_err.is_err());
-        assert_eq!(bet_err.unwrap_err(), "cannot_bet_must_raise");
+        assert_eq!(bet_err.unwrap_err().to_string(), "cannot_bet_must_raise");
 
         // P2 correctly raises to 30
         assert!(
@@ -1527,15 +1537,7 @@ mod tests {
         assert!(p1_chips == 50 || p1_chips == 51);
     }
 
-    // ========================================================================
-    // Five Card Draw Tests
-    // ========================================================================
-
     // Could add these if we really wanted to.
-
-    // ========================================================================
-    // Seven Card Stud Tests
-    // ========================================================================
 
     #[test]
     fn test_seven_card_stud_rotation_rules() {
@@ -1577,10 +1579,6 @@ mod tests {
         let action_uid_4th = game.eval_best_showing_hand();
         assert_eq!(action_uid_4th, Some(id_alice));
     }
-
-    // ========================================================================
-    // Texas Hold'em Tests
-    // ========================================================================
 
     #[test]
     fn test_texas_holdem_community_state_machine() {

@@ -103,8 +103,11 @@ impl Hand {
 
     pub fn evaluate(&self) -> HandRank {
         match self.len() {
-            0 => HandRank { category: HandCategory::HighCard, kickers: ArrayVec::new() },
-            
+            0 => HandRank {
+                category: HandCategory::HighCard,
+                kickers: ArrayVec::new(),
+            },
+
             1..=5 => self.evaluate_5cards(self.cards.as_slice()),
 
             7 => {
@@ -147,7 +150,6 @@ impl Hand {
     }
 
     fn evaluate_5cards(&self, cards: &[Card]) -> HandRank {
-
         let (counts, is_flush, mask) = self.analyze_hand(cards);
         let straight_high_card = Self::check_straight_mask(mask);
         let is_straight = straight_high_card.is_some();
@@ -155,29 +157,21 @@ impl Hand {
         let mut category = HandCategory::HighCard;
 
         if is_flush && is_straight {
-
             if straight_high_card == Some(14) {
                 category = HandCategory::RoyalFlush;
-
             } else {
                 category = HandCategory::StraightFlush;
             }
-            
         } else if counts.contains(&4) {
             category = HandCategory::FourOfAKind;
-
         } else if counts.contains(&3) && counts.contains(&2) {
             category = HandCategory::FullHouse;
-
         } else if is_flush {
             category = HandCategory::Flush;
-
         } else if is_straight {
             category = HandCategory::Straight;
-
         } else if counts.contains(&3) {
             category = HandCategory::ThreeOfAKind;
-
         } else {
             let pairs = counts.iter().filter(|&&c| c == 2).count();
             if pairs == 2 {
@@ -237,7 +231,12 @@ impl Hand {
         None
     }
 
-    fn push_ranks_by_count(&self, kickers: &mut ArrayVec<Rank, 5>, counts: &[u8; 13], target_count: u8) {
+    fn push_ranks_by_count(
+        &self,
+        kickers: &mut ArrayVec<Rank, 5>,
+        counts: &[u8; 13],
+        target_count: u8,
+    ) {
         // Iterate backwards from index 12 (Ace) to 0 (Two)
         for i in (0..13).rev() {
             if counts[i] == target_count {
@@ -266,8 +265,9 @@ impl Hand {
         }
     }
 
-    pub fn remove_at(&mut self, index: usize) -> Card { self.cards.remove(index) }
-
+    pub fn remove_at(&mut self, index: usize) -> Card {
+        self.cards.remove(index)
+    }
 }
 
 impl Default for Hand {

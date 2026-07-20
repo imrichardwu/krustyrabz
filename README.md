@@ -95,6 +95,18 @@ cargo check --workspace
 
 # Format the codebase
 cargo fmt --all
+
+# Run lints for every workspace target
+cargo clippy --workspace --all-targets
+```
+
+### Pre-commit checks
+
+The repository includes pre-commit checks for formatting and Clippy. Install
+[`pre-commit`](https://pre-commit.com/), then enable the hook once per clone:
+
+```bash
+pre-commit install
 ```
 
 ## How a move reaches the table

@@ -1,23 +1,19 @@
-// Poker Server Main Entry Point
-//
-// This is the main entry point for the poker game server.
-// The server acts as the "house" and manages poker games using Rocket HTTP.
-
 #[macro_use]
 extern crate rocket;
 
 pub mod betting;
 pub mod deck;
+pub mod error;
 pub mod game;
 pub mod house;
 pub mod player;
 pub mod table;
 
 use house::House;
-use tokio::runtime::Runtime;
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::Header;
 use rocket::{Request, Response};
+use tokio::runtime::Runtime;
 
 /// CORS fairing — allows the web client (port 8001) to connect to the server (port 8000).
 /// Required so the browser's EventSource API can subscribe to SSE game updates.
@@ -26,11 +22,17 @@ pub struct CorsFairing;
 #[rocket::async_trait]
 impl Fairing for CorsFairing {
     fn info(&self) -> Info {
-        Info { name: "CORS", kind: Kind::Response }
+        Info {
+            name: "CORS",
+            kind: Kind::Response,
+        }
     }
     async fn on_response<'r>(&self, _req: &'r Request<'_>, res: &mut Response<'r>) {
         res.set_header(Header::new("Access-Control-Allow-Origin", "*"));
-        res.set_header(Header::new("Access-Control-Allow-Methods", "GET, POST, OPTIONS"));
+        res.set_header(Header::new(
+            "Access-Control-Allow-Methods",
+            "GET, POST, OPTIONS",
+        ));
         res.set_header(Header::new("Access-Control-Allow-Headers", "Content-Type"));
     }
 }
@@ -41,10 +43,10 @@ fn rocket() -> _ {
     println!("Starting Poker Server...");
     println!("Server will be available at http://127.0.0.1:8000");
 
-    // need a Tokio runtime here to block the async call to initialize the DB 
-    // because [launch] functions cannot be async 
-    let rt = Runtime::new().expect("Failed to create Tokio runtime"); 
-    
+    // need a Tokio runtime here to block the async call to initialize the DB
+    // because [launch] functions cannot be async
+    let rt = Runtime::new().expect("Failed to create Tokio runtime");
+
     // Use the runtime to block on the async Repository initialization.
     // This internally creates the Supabase client and SeaORM connection.
     let repo = rt
@@ -56,11 +58,16 @@ fn rocket() -> _ {
 
     rocket::build()
         .attach(CorsFairing)
-        .attach(rocket::fairing::AdHoc::on_liftoff("Timeout Checker", |_| Box::pin(async move {
-            // Start timeout checker after Rocket runtime is ready
-            House::start_timeout_checker(house_games);
-            println!("⏰ Timeout checker started (30s inactivity limit)");
-        })))
+        .attach(rocket::fairing::AdHoc::on_liftoff(
+            "Timeout Checker",
+            |_| {
+                Box::pin(async move {
+                    // Start timeout checker after Rocket runtime is ready
+                    House::start_timeout_checker(house_games);
+                    println!("⏰ Timeout checker started (30s inactivity limit)");
+                })
+            },
+        ))
         .manage(house)
         .manage(repo)
         .mount(

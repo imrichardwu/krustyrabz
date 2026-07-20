@@ -1,11 +1,5 @@
-// Handles Table structure for poker games
-//
-// This module contains the Table data structure that manages
-// players and viewers at a poker table.
-
-use uuid::Uuid;
 use crate::player::Player;
-
+use uuid::Uuid;
 
 // Table Structure
 

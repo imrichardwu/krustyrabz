@@ -1,12 +1,12 @@
+use maud::{Markup, html};
+use poker_core::GameStatus;
+use rocket::State;
 use rocket::form::Form;
 use rocket::http::CookieJar;
 use rocket::response::Redirect;
-use rocket::State;
-use maud::{html, Markup};
-use poker_core::GameStatus;
 
-use crate::{get_session, HxRedirect};
 use crate::api::PokerClient;
+use crate::{HxRedirect, get_session};
 
 pub async fn list_and_join_games_fragment(client: &PokerClient) -> Markup {
     match client.list_games().await {

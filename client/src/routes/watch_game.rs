@@ -1,17 +1,19 @@
+use maud::{Markup, html};
+use poker_core::GameStatus;
+use rocket::State;
 use rocket::form::Form;
 use rocket::http::CookieJar;
 use rocket::response::Redirect;
-use rocket::State;
-use maud::{html, Markup};
-use poker_core::GameStatus;
 
-use crate::{get_session, HxRedirect};
 use crate::api::PokerClient;
+use crate::{HxRedirect, get_session};
 
 pub async fn watch_game_fragment(client: &PokerClient, user_id: &str) -> Markup {
     match client.list_games().await {
         Ok(response) => {
-            let watchable: Vec<_> = response.games.iter()
+            let watchable: Vec<_> = response
+                .games
+                .iter()
                 .filter(|g| g.status != GameStatus::Finished)
                 .collect();
             html! {

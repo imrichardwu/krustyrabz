@@ -1,8 +1,8 @@
-use rocket::post;
-use rocket::http::CookieJar;
-use rocket::State;
-use crate::{get_session, HxRedirect};
 use crate::api::PokerClient;
+use crate::{HxRedirect, get_session};
+use rocket::State;
+use rocket::http::CookieJar;
+use rocket::post;
 
 /// POST /game/leave - Leave the current game
 #[post("/game/leave?<game_id>")]

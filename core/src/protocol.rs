@@ -1,14 +1,5 @@
-// Shared Protocol Types for Client-Server Communication
-//
-// This module contains message structures used for HTTP communication
-// between the poker client and server using Rocket/reqwest.
-
 use serde::{Deserialize, Serialize};
-use uuid::Uuid; 
-
-// ============================================================================
-// Request Types (Client -> Server)
-// ============================================================================
+use uuid::Uuid;
 
 /// Request to create a new game.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,11 +17,11 @@ pub struct JoinGameRequest {
     pub game_id: String,
 }
 
-/// Request to change the variant of an existing game. 
-#[derive(Debug, Clone, Serialize, Deserialize)] 
+/// Request to change the variant of an existing game.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DealerChoiceRequest {
-    pub game_id: String, 
-    pub game_type: String, 
+    pub game_id: String,
+    pub game_type: String,
 }
 
 /// Request to perform a game action.
@@ -56,7 +47,7 @@ pub struct StatsRequest {
 
 /// Request to add chips to a player's account.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AddChipsRequest{
+pub struct AddChipsRequest {
     pub player_id: String,
     pub num_chips: u32,
     pub credit_limit: u32,
@@ -74,10 +65,6 @@ pub struct WithdrawChipsRequest {
 pub struct SitOutRequest {
     pub player_id: String,
 }
-
-// ============================================================================
-// Response Types (Server -> Client)
-// ============================================================================
 
 /// Generic server response for simple operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,7 +110,12 @@ pub struct WithdrawChipsResponse {
 }
 
 impl WithdrawChipsResponse {
-    pub fn success(message: impl Into<String>, player_id: Uuid, chips_withdrawn: u32, new_balance: u32) -> Self {
+    pub fn success(
+        message: impl Into<String>,
+        player_id: Uuid,
+        chips_withdrawn: u32,
+        new_balance: u32,
+    ) -> Self {
         Self {
             success: true,
             message: message.into(),
@@ -144,22 +136,26 @@ impl WithdrawChipsResponse {
     }
 }
 
-impl AddChipsResponse { 
-    pub fn success(message: impl Into<String>, player_id: Uuid, credit_limit: u32, chips_added: u32) -> Self { 
-        Self { 
-            success: true, 
-            message: message.into(), 
-            player_id, 
+impl AddChipsResponse {
+    pub fn success(
+        message: impl Into<String>,
+        player_id: Uuid,
+        credit_limit: u32,
+        chips_added: u32,
+    ) -> Self {
+        Self {
+            success: true,
+            message: message.into(),
+            player_id,
             credit_limit,
             chips_added,
         }
     }
 
-    pub fn error(message: impl Into<String>, player_id: Uuid, credit_limit: u32) -> Self 
-    {
-        Self { 
-            success: false, 
-            message: message.into(), 
+    pub fn error(message: impl Into<String>, player_id: Uuid, credit_limit: u32) -> Self {
+        Self {
+            success: false,
+            message: message.into(),
             player_id,
             credit_limit,
             chips_added: 0,
@@ -267,10 +263,6 @@ pub struct HouseRules {
     pub big_blind: u32,
 }
 
-// ============================================================================
-// Enums
-// ============================================================================
-
 /// Types of poker games supported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameType {
@@ -300,9 +292,9 @@ pub enum GameStatus {
 /// Betting rounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BettingRound {
-    PreDraw,    // Five Card Draw
-    Drawing,    // Five Card Draw (discard/draw phase)
-    PostDraw,   // Five Card Draw
+    PreDraw,      // Five Card Draw
+    Drawing,      // Five Card Draw (discard/draw phase)
+    PostDraw,     // Five Card Draw
     ThirdStreet,  // Seven Card Stud
     FourthStreet, // Seven Card Stud
     FifthStreet,  // Seven Card Stud
@@ -405,7 +397,7 @@ mod tests {
             your_hand: vec!["A♠".to_string(), "K♥".to_string()],
             your_chips: 500,
             last_hand_message: None,
-            swap: false, 
+            swap: false,
         };
         let r = GameResponse::success("Joined", "game-1".to_string(), state);
         assert!(r.success);

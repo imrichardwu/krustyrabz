@@ -1,5 +1,5 @@
-
-#[derive(Debug, Clone)]pub enum BetAction {
+#[derive(Debug, Clone)]
+pub enum BetAction {
     Check,
     Call,
     Bet { amount: u32 },
@@ -8,9 +8,8 @@
 }
 
 pub enum BettingOutcome {
-    MatchedHighestBet, 
-    Folded
-    //Continue, // next player acts
-    //BettingRoundComplete,
-    //HandComplete { winner: Uuid },
+    MatchedHighestBet,
+    Folded, //Continue, // next player acts
+            //BettingRoundComplete,
+            //HandComplete { winner: Uuid },
 }

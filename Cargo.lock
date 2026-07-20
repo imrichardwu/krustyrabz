@@ -474,6 +474,7 @@ dependencies = [
  "serde",
  "serde_json",
  "storage",
+ "thiserror 2.0.18",
  "tokio",
  "urlencoding",
  "uuid",
@@ -3044,6 +3045,7 @@ dependencies = [
  "storage",
  "strum 0.27.2",
  "strum_macros",
+ "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]
@@ -3443,6 +3445,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "supabase_rs",
+ "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]

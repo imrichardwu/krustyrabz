@@ -1,9 +1,5 @@
-// betting.rs - Betting round and state management
-//
-// This module handles betting rounds and state for all poker variants.
-
-use uuid::Uuid;
 use strum_macros::Display;
+use uuid::Uuid;
 
 /// Stores round-types for all 3 poker variants.
 /// PreDeal is shared across all 3 variants, it specifies that the game has not yet started.
@@ -46,8 +42,8 @@ pub enum BetAction {
     Check,
     Fold,
     Call,
-   //Raise To (the total amount the player wishes to reach)
-    RaiseTo(u32), 
+    //Raise To (the total amount the player wishes to reach)
+    RaiseTo(u32),
     AllIn,
 }
 
@@ -58,9 +54,9 @@ pub struct BettingState {
     pub min_raise: u32,
     pub raises_used: u8,
     pub max_raises: u8,
-    
+
     // Flow Control
-    pub last_aggressor: Option<Uuid>, 
+    pub last_aggressor: Option<Uuid>,
 }
 
 impl BettingState {
@@ -105,7 +101,7 @@ mod tests {
     #[test]
     fn test_betting_state_new_defaults() {
         let state = BettingState::new();
-        
+
         assert_eq!(state.to_call, 0, "Initial amount to call should be 0");
         assert_eq!(state.min_raise, 10, "Default min raise should be 10");
         assert_eq!(state.raises_used, 0, "Initial raises used should be 0");
@@ -118,11 +114,17 @@ mod tests {
         let custom_min_raise = 50;
         let custom_max_raises = 5;
         let state = BettingState::with_limits(custom_min_raise, custom_max_raises);
-        
+
         assert_eq!(state.to_call, 0);
-        assert_eq!(state.min_raise, 50, "Min raise should match custom initialization");
+        assert_eq!(
+            state.min_raise, 50,
+            "Min raise should match custom initialization"
+        );
         assert_eq!(state.raises_used, 0);
-        assert_eq!(state.max_raises, 5, "Max raises should match custom initialization");
+        assert_eq!(
+            state.max_raises, 5,
+            "Max raises should match custom initialization"
+        );
         assert_eq!(state.last_aggressor, None);
     }
 
@@ -141,11 +143,23 @@ mod tests {
 
         // These should be cleared
         assert_eq!(state.to_call, 0, "to_call must reset to 0 for a new round");
-        assert_eq!(state.raises_used, 0, "raises_used must reset to 0 for a new round");
-        assert_eq!(state.last_aggressor, None, "last_aggressor must be cleared for a new round");
-        
+        assert_eq!(
+            state.raises_used, 0,
+            "raises_used must reset to 0 for a new round"
+        );
+        assert_eq!(
+            state.last_aggressor, None,
+            "last_aggressor must be cleared for a new round"
+        );
+
         // These underlying table limits should remain completely untouched
-        assert_eq!(state.min_raise, 10, "Table minimum raise limit should persist across rounds");
-        assert_eq!(state.max_raises, 3, "Table maximum raise limit should persist across rounds");
+        assert_eq!(
+            state.min_raise, 10,
+            "Table minimum raise limit should persist across rounds"
+        );
+        assert_eq!(
+            state.max_raises, 3,
+            "Table maximum raise limit should persist across rounds"
+        );
     }
 }

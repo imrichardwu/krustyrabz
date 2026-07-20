@@ -6,3 +6,6 @@ members = [
     "core",
     "storage"
 ]
+
+[workspace.dependencies]
+thiserror = "2"

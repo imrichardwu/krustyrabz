@@ -1,44 +1,34 @@
-use supabase_rs::SupabaseClient;
-use dotenv::dotenv;
-use std::env;
-use sea_orm::DatabaseConnection;
 use crate::entities::UserAccount;
-use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
+use crate::error::RepositoryError;
+use dotenv::dotenv;
 use sea_orm::prelude::Expr;
+use sea_orm::DatabaseConnection;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::env;
+use supabase_rs::SupabaseClient;
 use uuid::Uuid;
 
-/// Initialize and return a Supabase client using environment variables
-/// 
-/// Reads SUPABASE_URL and SUPABASE_KEY from .env file or environment variables
-/// 
-/// # Example
-/// ```no_run
-/// use storage::repository::create_supabase_client;
-/// 
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let client = create_supabase_client().await?;
-///     // Use client for database operations
-///     Ok(())
-/// }
-/// ```
-pub async fn create_supabase_client() -> Result<SupabaseClient, Box<dyn std::error::Error>> {
+/// Initialize and return a Supabase client, reading SUPABASE_URL and SUPABASE_KEY
+/// from the .env file or environment variables.
+pub async fn create_supabase_client() -> Result<SupabaseClient, RepositoryError> {
     // Load environment variables from .env file
     dotenv().ok();
-    
+
     // Get Supabase URL and API key from environment
-    let url = env::var("SUPABASE_URL")
-        .map_err(|_| "SUPABASE_URL not found in environment variables")?;
-    
-    let key = env::var("SUPABASE_KEY")
-        .map_err(|_| "SUPABASE_KEY not found in environment variables")?;
-    
+    let url = env::var("SUPABASE_URL").map_err(|_| {
+        RepositoryError::Env("SUPABASE_URL not found in environment variables".to_string())
+    })?;
+
+    let key = env::var("SUPABASE_KEY").map_err(|_| {
+        RepositoryError::Env("SUPABASE_KEY not found in environment variables".to_string())
+    })?;
+
     // Create and return Supabase client
-    let client = SupabaseClient::new(url, key)?;
-    
+    let client =
+        SupabaseClient::new(url, key).map_err(|e| RepositoryError::Supabase(e.to_string()))?;
+
     Ok(client)
 }
-
 
 /// Repository struct to hold both Supabase client and SeaORM database connection
 pub struct Repository {
@@ -48,42 +38,39 @@ pub struct Repository {
 
 impl Repository {
     /// Create a new repository instance with both Supabase client and SeaORM connection
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new() -> Result<Self, RepositoryError> {
         let supabase_client = create_supabase_client().await?;
         let db = crate::establish_connection().await?;
-        Ok(Repository { 
+        Ok(Repository {
             supabase_client,
             db,
         })
     }
-    
+
     /// Get a reference to the Supabase client
     pub fn supabase_client(&self) -> &SupabaseClient {
         &self.supabase_client
     }
-    
+
     /// Get a mutable reference to the Supabase client
     pub fn supabase_client_mut(&mut self) -> &mut SupabaseClient {
         &mut self.supabase_client
     }
-    
+
     /// Get a reference to the SeaORM database connection
     pub fn db(&self) -> &DatabaseConnection {
         &self.db
     }
-    
+
     /// Create a new user account with default values.
-    /// Username must be unique; returns error if it is already taken.
-    ///
-    /// # Arguments
-    /// * `username` - The username for the new user (must be unique)
-    /// * `id` - The user id from Supabase Auth (used as primary key)
-    ///
-    /// # Returns
-    /// Returns the created user model or a database error
-    pub async fn create_user(&self, username: String, id: Uuid) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+    /// Username must be unique; returns an error if it is already taken.
+    pub async fn create_user(
+        &self,
+        username: String,
+        id: Uuid,
+    ) -> Result<crate::entities::user_account::Model, RepositoryError> {
         use crate::entities::UserAccount;
-        use sea_orm::{Set, EntityTrait, QueryFilter, ColumnTrait};
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
 
         // Ensure username is unique before creating
         let existing = UserAccount::find()
@@ -91,7 +78,7 @@ impl Repository {
             .one(&self.db)
             .await?;
         if existing.is_some() {
-            return Err(format!("Username '{}' is already taken", username).into());
+            return Err(RepositoryError::UsernameTaken(username));
         }
 
         let active_model = crate::entities::user_account::ActiveModel {
@@ -104,107 +91,154 @@ impl Repository {
             id: Set(id),
         };
 
-        UserAccount::insert(active_model)
-            .exec(&self.db)
-            .await?;
+        UserAccount::insert(active_model).exec(&self.db).await?;
 
         self.get_user_by_id(id).await
     }
 
     /// Get a user account by id (Supabase Auth id).
-    pub async fn get_user_by_id(&self, id: Uuid) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+    pub async fn get_user_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<crate::entities::user_account::Model, RepositoryError> {
         match UserAccount::find_by_id(id).one(&self.db).await {
             Ok(Some(model)) => Ok(model),
-            Ok(None) => {
-                Err(Box::from(sea_orm::DbErr::RecordNotFound(format!(
-                    "User with id '{}' not found",
-                    id
-                ))))
-            }
-            Err(entity_err) => {
-                Err(Box::from(entity_err))
-            }
+            Ok(None) => Err(RepositoryError::UserNotFound(id)),
+            Err(entity_err) => Err(RepositoryError::Db(entity_err)),
         }
     }
 
     //pass negative to decrease and positive to increase
-    pub async fn update_user_token_balance(&self, id: Uuid, amount: f64) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+    pub async fn update_user_token_balance(
+        &self,
+        id: Uuid,
+        amount: f64,
+    ) -> Result<crate::entities::user_account::Model, RepositoryError> {
         use crate::entities::UserAccount;
         let update_result = UserAccount::update_many()
-            .col_expr(crate::entities::user_account::Column::TokenBalance, Expr::col(crate::entities::user_account::Column::TokenBalance).add(amount))
+            .col_expr(
+                crate::entities::user_account::Column::TokenBalance,
+                Expr::col(crate::entities::user_account::Column::TokenBalance).add(amount),
+            )
             .filter(crate::entities::user_account::Column::Id.eq(id))
             .exec(&self.db)
             .await?;
 
         if update_result.rows_affected == 0 {
-            return Err(format!("Failed to update token_balance for user id '{}'", id).into());
+            return Err(RepositoryError::UpdateFailed {
+                field: "token_balance",
+                id,
+            });
         }
 
         self.get_user_by_id(id).await
     }
-//could try to use generics to condense into single update method but it doesn't really matter for 4
-//attributes
-    pub async fn increase_rounds_played(&self, id: Uuid, rounds: i32) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+    //could try to use generics to condense into single update method but it doesn't really matter for 4
+    //attributes
+    pub async fn increase_rounds_played(
+        &self,
+        id: Uuid,
+        rounds: i32,
+    ) -> Result<crate::entities::user_account::Model, RepositoryError> {
         if rounds < 0 {
-            return Err(format!("Parameter error: rounds can only be >= 0, but '{}' passed instead", rounds).into());
+            return Err(RepositoryError::NegativeParameter {
+                name: "rounds",
+                value: rounds,
+            });
         }
         let update_result = UserAccount::update_many()
-            .col_expr(crate::entities::user_account::Column::RoundsPlayed, Expr::col(crate::entities::user_account::Column::RoundsPlayed).add(rounds))
+            .col_expr(
+                crate::entities::user_account::Column::RoundsPlayed,
+                Expr::col(crate::entities::user_account::Column::RoundsPlayed).add(rounds),
+            )
             .filter(crate::entities::user_account::Column::Id.eq(id))
             .exec(&self.db)
             .await?;
 
         if update_result.rows_affected == 0 {
-            return Err(format!("Failed to update rounds_played for user id '{}'", id).into());
+            return Err(RepositoryError::UpdateFailed {
+                field: "rounds_played",
+                id,
+            });
         }
 
         self.get_user_by_id(id).await
     }
 
-//could try to use generics to condense into single update method but it doesn't really matter for 4
-//attributes
-    pub async fn increase_pots_won(&self, id: Uuid, pots: i32) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+    //could try to use generics to condense into single update method but it doesn't really matter for 4
+    //attributes
+    pub async fn increase_pots_won(
+        &self,
+        id: Uuid,
+        pots: i32,
+    ) -> Result<crate::entities::user_account::Model, RepositoryError> {
         use crate::entities::UserAccount;
         if pots < 0 {
-            return Err(format!("Parameter error: pots can only be >= 0, but '{}' passed instead", pots).into());
+            return Err(RepositoryError::NegativeParameter {
+                name: "pots",
+                value: pots,
+            });
         }
         let update_result = UserAccount::update_many()
-            .col_expr(crate::entities::user_account::Column::PotsWon, Expr::col(crate::entities::user_account::Column::PotsWon).add(pots))
+            .col_expr(
+                crate::entities::user_account::Column::PotsWon,
+                Expr::col(crate::entities::user_account::Column::PotsWon).add(pots),
+            )
             .filter(crate::entities::user_account::Column::Id.eq(id))
             .exec(&self.db)
             .await?;
 
         if update_result.rows_affected == 0 {
-            return Err(format!("Failed to update pots_won for user id '{}'", id).into());
+            return Err(RepositoryError::UpdateFailed {
+                field: "pots_won",
+                id,
+            });
         }
 
         self.get_user_by_id(id).await
     }
 
-    pub async fn increase_number_folds(&self, id: Uuid, folds: i32) -> Result<crate::entities::user_account::Model, Box<dyn std::error::Error>> {
+    pub async fn increase_number_folds(
+        &self,
+        id: Uuid,
+        folds: i32,
+    ) -> Result<crate::entities::user_account::Model, RepositoryError> {
         use crate::entities::UserAccount;
         if folds < 0 {
-            return Err(format!("Parameter error: folds can only be >= 0, but '{}' passed instead", folds).into());
+            return Err(RepositoryError::NegativeParameter {
+                name: "folds",
+                value: folds,
+            });
         }
         let update_result = UserAccount::update_many()
-            .col_expr(crate::entities::user_account::Column::NumberFolds, Expr::col(crate::entities::user_account::Column::NumberFolds).add(folds))
+            .col_expr(
+                crate::entities::user_account::Column::NumberFolds,
+                Expr::col(crate::entities::user_account::Column::NumberFolds).add(folds),
+            )
             .filter(crate::entities::user_account::Column::Id.eq(id))
             .exec(&self.db)
             .await?;
 
         if update_result.rows_affected == 0 {
-            return Err(format!("Failed to update number_folds for user id '{}'", id).into());
+            return Err(RepositoryError::UpdateFailed {
+                field: "number_folds",
+                id,
+            });
         }
 
         self.get_user_by_id(id).await
     }
     #[cfg(test)]
     pub fn new_with_mock(db: DatabaseConnection) -> Self {
-    Self {
-        supabase_client: SupabaseClient::new("http://localhost".to_string(), "dummy".to_string()).unwrap(),
-        db,
+        Self {
+            supabase_client: SupabaseClient::new(
+                "http://localhost".to_string(),
+                "dummy".to_string(),
+            )
+            .unwrap(),
+            db,
+        }
     }
-}
 }
 
 // Example usage functions - adjust based on supabase_rs API documentation
@@ -267,10 +301,15 @@ mod mock_tests {
             .into_connection();
 
         let repo = Repository::new_with_mock(db);
-        let result = repo.create_user("ExistingPlayer".to_string(), test_id).await;
+        let result = repo
+            .create_user("ExistingPlayer".to_string(), test_id)
+            .await;
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Username 'ExistingPlayer' is already taken");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Username 'ExistingPlayer' is already taken"
+        );
     }
 
     #[tokio::test]
@@ -280,7 +319,10 @@ mod mock_tests {
         expected_user.token_balance = Some(150.0); // Simulated updated balance
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(vec![MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results(vec![MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .append_query_results(vec![vec![expected_user]])
             .into_connection();
 
@@ -294,7 +336,7 @@ mod mock_tests {
     #[tokio::test]
     async fn test_increase_rounds_played_validation() {
         let test_id = Uuid::new_v4();
-        
+
         //don't even need a mock DB here because it should fail before the DB call
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let repo = Repository::new_with_mock(db);
@@ -303,7 +345,10 @@ mod mock_tests {
         let result = repo.increase_rounds_played(test_id, -1).await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Parameter error: rounds can only be >= 0"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Parameter error: rounds can only be >= 0"));
     }
 
     #[tokio::test]
@@ -313,7 +358,10 @@ mod mock_tests {
         expected_user.pots_won = Some(4);
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(vec![MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results(vec![MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .append_query_results(vec![vec![expected_user]])
             .into_connection();
 

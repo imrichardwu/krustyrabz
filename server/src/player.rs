@@ -1,7 +1,7 @@
+use crate::error::GameError;
+use poker_core::{Card, Hand};
+use rocket::serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use rocket::serde::{Serialize, Deserialize};
-use poker_core::{Hand, Card};
-
 
 // Player Statistics
 
@@ -61,7 +61,7 @@ pub struct Player {
     #[serde(skip, default)]
     pub hand: Hand,
     pub is_folded: bool,
-    pub game_id: Option<Uuid>, 
+    pub game_id: Option<Uuid>,
     pub current_bet: u32,
 }
 
@@ -72,7 +72,7 @@ impl Player {
             username,
             chips: starting_chips,
             hand: Hand::new(),
-            game_id: None, 
+            game_id: None,
             is_folded: false,
             current_bet: 0,
         }
@@ -84,10 +84,14 @@ impl Player {
 
     /// Discard cards at the given indices (descending, deduped), then add the new cards.
     /// Caller must deal exactly `unique_discard_count` cards and pass them here.
-    pub fn draw(&mut self, discard_indices: &[usize], new_cards: Vec<Card>) -> Result<(), String> {
+    pub fn draw(
+        &mut self,
+        discard_indices: &[usize],
+        new_cards: Vec<Card>,
+    ) -> Result<(), GameError> {
         for &idx in discard_indices {
             if idx >= self.hand.len() {
-                return Err("Invalid card index".to_string());
+                return Err(GameError::InvalidCardIndex);
             }
         }
 
@@ -96,7 +100,7 @@ impl Player {
         sorted_indices.dedup();
 
         if new_cards.len() != sorted_indices.len() {
-            return Err("New cards count must match number of unique discard indices".to_string());
+            return Err(GameError::NewCardsCountMismatch);
         }
 
         for &i in &sorted_indices {
@@ -111,7 +115,7 @@ impl Player {
     }
 }
 
-// Viewer Type 
+// Viewer Type
 
 /// Represents a viewer watching a game without participating.
 #[derive(Debug, Clone, Serialize, Deserialize)]

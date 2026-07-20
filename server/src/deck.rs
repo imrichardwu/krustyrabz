@@ -1,4 +1,4 @@
-use poker_core::{Card, Rank, Suit, CardType, DeckTrait};
+use poker_core::{Card, CardType, DeckTrait, Rank, Suit};
 use rand::seq::SliceRandom;
 use strum::IntoEnumIterator;
 
@@ -10,8 +10,8 @@ pub struct Deck {
 impl Deck {
     pub fn construct() -> Self {
         let mut cards = Vec::with_capacity(52);
-        for suit in Suit::iter(){
-            for rank in Rank::iter(){
+        for suit in Suit::iter() {
+            for rank in Rank::iter() {
                 cards.push(Card::construct(rank, suit, CardType::Community))
             }
         }
@@ -38,14 +38,13 @@ impl Deck {
 impl DeckTrait for Deck {
     fn deal(&mut self, count: usize) -> Vec<Card> {
         let min_draw = count.min(self.cards.len());
-        self.cards.drain(..min_draw).collect() 
+        self.cards.drain(..min_draw).collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use poker_core::card::{Card, Rank, Suit}; 
 
     #[test]
     fn test_new_deck_has_52_cards() {
@@ -57,7 +56,7 @@ mod tests {
     fn test_deck_deals_correctly() {
         let mut deck = Deck::construct();
         let initial_size = deck.cards.len();
-        
+
         let cards = deck.deal(1);
         assert_eq!(cards.len(), 1);
         assert_eq!(deck.cards.len(), initial_size - 1);
@@ -69,7 +68,7 @@ mod tests {
         for _ in 0..52 {
             deck.deal(1);
         }
-        
+
         assert!(deck.deal(1).is_empty());
     }
 
@@ -77,7 +76,7 @@ mod tests {
     fn test_deck_shuffle_changes_order() {
         let mut deck1 = Deck::construct();
         let deck2 = Deck::construct();
-        
+
         deck1.shuffle();
         assert_ne!(deck1.cards, deck2.cards);
         assert_eq!(deck1.cards.len(), 52);
