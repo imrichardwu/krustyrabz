@@ -81,7 +81,7 @@ cd krustyrabz
 
 # 2. Configure environment variables
 cp .env.example .env
-#    then fill in your database URL / Supabase credentials
+# then fill in your database URL / Supabase credentials
 
 # 3. Run database migrations
 cargo run --bin migrate   # (adjust to your migration command)
